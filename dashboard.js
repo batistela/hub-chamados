@@ -42,13 +42,26 @@ async function loadAll() {
 
 // Aviso de versão nova disponível no repositório do GitHub (ver checkForUpdate em
 // background.js) — só aparece quando updateCheckUrl está configurado E a versão do
-// version.json é mais nova que a instalada. Nunca atualiza sozinho, só avisa.
+// version.json é mais nova que a instalada. O botão "Baixar" só baixa o .zip pra pasta
+// Downloads (é o máximo que a permissão "downloads" do Chrome permite) — a extensão não
+// consegue descompactar nem substituir os arquivos sozinha (o Chrome bloqueia isso de
+// propósito, senão qualquer extensão poderia se auto-modificar com código de qualquer
+// lugar da internet). Ainda precisa extrair o .zip, substituir os arquivos na pasta
+// onde a extensão está instalada, e recarregar em chrome://extensions.
 function renderUpdateBanner(info) {
   const banner = el('updateBanner');
   if (info && info.available) {
     const link = info.url ? ` <a href="${info.url}" target="_blank">abrir repositório</a>` : '';
-    banner.innerHTML = `Nova versão do Hub disponível: <strong>v${info.version}</strong>${info.notes ? ` — ${info.notes}` : ''}${link}`;
+    banner.innerHTML =
+      `Nova versão do Hub disponível: <strong>v${info.version}</strong>${info.notes ? ` — ${info.notes}` : ''}${link}` +
+      (info.zipUrl ? ' <button id="btnDownloadUpdate" class="btn">Baixar atualização (.zip)</button>' : '') +
+      '<div class="muted small" style="margin-top:4px;">Baixa pra pasta Downloads — depois é só extrair e substituir os arquivos desta pasta, e recarregar a extensão em chrome://extensions.</div>';
     banner.className = 'banner update';
+    if (info.zipUrl) {
+      el('btnDownloadUpdate').addEventListener('click', () => {
+        chrome.downloads.download({ url: info.zipUrl, filename: `hub-chamados-v${info.version}.zip` });
+      });
+    }
   } else {
     banner.className = 'banner update hidden';
   }

@@ -692,8 +692,15 @@ async function checkForUpdate(config) {
     const current = chrome.runtime.getManifest().version;
     const remote = String(data.version || '').trim();
     if (remote && compareVersions(remote, current) > 0) {
+      // zipUrl: de onde o botão "Baixar atualização" no Hub pega o arquivo. Se o
+      // version.json não trouxer um `zipUrl` explícito, monta a partir da URL do
+      // repositório (`data.url`) assumindo o padrão de link de "baixar .zip da branch"
+      // do próprio GitHub — funciona pra qualquer repositório público sem precisar de
+      // configuração extra, só quebra se a branch principal não se chamar "main".
+      const repoUrl = (data.url || '').replace(/\/+$/, '');
+      const zipUrl = data.zipUrl || (repoUrl ? `${repoUrl}/archive/refs/heads/main.zip` : '');
       await chrome.storage.local.set({
-        updateInfo: { available: true, version: remote, notes: data.notes || '', url: data.url || '' },
+        updateInfo: { available: true, version: remote, notes: data.notes || '', url: data.url || '', zipUrl },
       });
     } else {
       await chrome.storage.local.set({ updateInfo: null });

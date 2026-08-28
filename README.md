@@ -50,7 +50,7 @@ Use o botão **Verificar agora** para forçar uma checagem imediata, sem esperar
 
 ## 6. Publicando atualizações no GitHub (aviso de versão nova)
 
-O Hub pode avisar sozinho, na tela, quando existe uma versão mais nova disponível — mas como a extensão é instalada via "Carregar sem compactação" (modo desenvolvedor), o Chrome não tem nenhum mecanismo de auto-update pra ela: o Hub só **avisa**, com um link pra pegar a atualização; baixar e recarregar em `chrome://extensions` continua manual, pra cada pessoa.
+O Hub pode avisar sozinho, na tela, quando existe uma versão mais nova disponível — mas como a extensão é instalada via "Carregar sem compactação" (modo desenvolvedor), o Chrome não tem nenhum mecanismo de auto-update pra ela: o aviso mostra um botão **"Baixar atualização (.zip)"** que já baixa o arquivo certo pra pasta Downloads, mas descompactar, substituir os arquivos na pasta onde a extensão está instalada e recarregar em `chrome://extensions` continua manual, pra cada pessoa — o Chrome bloqueia de propósito qualquer forma de a extensão se auto-substituir sozinha (senão qualquer extensão poderia se atualizar com código de qualquer lugar da internet).
 
 Isso funciona comparando a versão instalada com um arquivo `version.json` neste repositório. Pra publicar uma atualização nova:
 

@@ -3,7 +3,7 @@
   "name": "Hub de Chamados - Holambra",
   "version": "1.1.0",
   "description": "Monitora chamados no GLPI, Evolutize e Movidesk e avisa (notificação + som) quando algo mudar.",
-  "permissions": ["storage", "unlimitedStorage", "alarms", "notifications", "scripting", "tabs", "offscreen"],
+  "permissions": ["storage", "unlimitedStorage", "alarms", "notifications", "scripting", "tabs", "offscreen", "downloads"],
   "host_permissions": [
     "http://chamadosti.holambra.corp/*",
     "https://suporte.evolutize.com.br/*",

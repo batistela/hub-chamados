@@ -260,6 +260,7 @@ main {
 .banner.error { background: #fef2f2; color: var(--danger); }
 .banner.update { background: #eff6ff; color: #1d4ed8; }
 .banner.update a { color: inherit; font-weight: 600; }
+.banner.update button { margin-left: 8px; }
 .hidden { display: none; }
 
 .source-error {
