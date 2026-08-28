@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<!-- Hub de Chamados — autoria original: Murilo (murilobats@gmail.com), início em ago/2026. -->
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Hub de Chamados</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Hub de Chamados</h1>
+    <div class="topbar-actions">
+      <span id="lastCheck" class="muted">Nunca verificado</span>
+      <span id="autoCheckStatus" class="muted small"></span>
+      <button id="btnCheckNow" class="btn primary">Verificar agora</button>
+    </div>
+  </header>
+
+  <section id="statusBanner" class="banner hidden"></section>
+  <section id="updateBanner" class="banner update hidden"></section>
+
+  <main>
+    <section class="card">
+      <h2>Configurações</h2>
+      <div class="config-grid">
+        <label>
+          Intervalo de verificação (minutos)
+          <input type="number" id="intervalMinutes" min="0" max="180" step="1" />
+          <span class="muted small">0 = desativa a verificação automática (só verifica quando você clicar em "Verificar agora"). Mínimo de 1 minuto quando ativado.</span>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="soundEnabled" />
+          Tocar som ao notificar
+        </label>
+        <label class="full-width">
+          URL da pesquisa salva do GLPI (cole aqui a URL da tela depois de aplicar o filtro)
+          <input type="text" id="glpiSearchUrl" placeholder="http://chamadosti.holambra.corp/front/ticket.php?..." />
+        </label>
+        <label>
+          Alertar chamado "parado" após quantos dias sem tramitação
+          <input type="number" id="staleDays" min="0" max="365" step="1" />
+          <span class="muted small">0 = desativado. Vale pra tudo (listas e avulsos); cada avulso pode ter seu próprio valor, mais abaixo, pra casos mais urgentes.</span>
+        </label>
+        <label class="full-width">
+          URL do arquivo de versão no GitHub (version.json)
+          <input type="text" id="updateCheckUrl" placeholder="https://raw.githubusercontent.com/usuario/repositorio/main/version.json" />
+          <span class="muted small">Vazio = desativado. Quando configurado, avisa aqui no Hub quando sai uma versão mais nova no repositório (não atualiza sozinho — só avisa e dá o link).</span>
+        </label>
+      </div>
+
+      <div class="avulsos-grid">
+        <div>
+          <h3>Chamados avulsos — GLPI</h3>
+          <p class="muted small">Números de chamados que você acompanha fora do filtro principal (ex: repassados sem constar como observador).</p>
+          <label class="checkbox-row small">
+            <input type="checkbox" id="glpiOnlyAvulsos" />
+            Mostrar só os avulsos (não puxar a lista completa)
+          </label>
+          <div class="avulso-add">
+            <input type="text" id="glpiAvulsoInput" placeholder="Número do chamado" />
+            <button id="btnAddGlpiAvulso" class="btn">Adicionar</button>
+          </div>
+          <ul id="glpiAvulsoList" class="avulso-list"></ul>
+        </div>
+        <div>
+          <h3>Chamados avulsos — Evolutize</h3>
+          <p class="muted small">Chamados repassados que não aparecem na sua lista, ou — se marcar a caixa abaixo — todos os que você quer acompanhar (em vez da lista completa).</p>
+          <label class="checkbox-row small">
+            <input type="checkbox" id="evolutizeOnlyAvulsos" />
+            Mostrar só os avulsos (não puxar a lista completa)
+          </label>
+          <div class="avulso-add">
+            <input type="text" id="evoAvulsoInput" placeholder="Número do chamado" />
+            <button id="btnAddEvoAvulso" class="btn">Adicionar</button>
+          </div>
+          <ul id="evoAvulsoList" class="avulso-list"></ul>
+        </div>
+        <div>
+          <h3>Chamados avulsos — Movidesk</h3>
+          <p class="muted small">Chamados que você quer acompanhar individualmente por número, além (ou no lugar) da visualização "Teste".</p>
+          <label class="checkbox-row small">
+            <input type="checkbox" id="movideskOnlyAvulsos" />
+            Mostrar só os avulsos (não puxar a lista completa)
+          </label>
+          <div class="avulso-add">
+            <input type="text" id="mdAvulsoInput" placeholder="Número do chamado" />
+            <button id="btnAddMdAvulso" class="btn">Adicionar</button>
+          </div>
+          <ul id="mdAvulsoList" class="avulso-list"></ul>
+        </div>
+      </div>
+
+      <div class="config-actions">
+        <button id="btnSaveConfig" class="btn primary">Salvar configurações</button>
+        <button id="btnExportConfig" class="btn">Exportar configurações</button>
+        <button id="btnImportConfig" class="btn">Importar configurações</button>
+        <input type="file" id="importConfigInput" accept="application/json,.json" class="hidden" />
+      </div>
+      <p id="importStatus" class="muted small hidden"></p>
+    </section>
+
+    <section class="card">
+      <h2>Links rápidos</h2>
+      <p class="muted small">Atalhos pra outros sistemas que você (ou um colega) usa pra acompanhar chamados, mas que o Hub não monitora — só abre a página numa aba nova, sem verificação nem notificação automática.</p>
+      <div class="avulso-add">
+        <input type="text" id="customLinkLabel" placeholder="Nome (ex: Zendesk)" />
+        <input type="text" id="customLinkUrl" placeholder="https://..." />
+        <button id="btnAddCustomLink" class="btn">Adicionar</button>
+      </div>
+      <ul id="customLinkList" class="avulso-list"></ul>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Atualizações recentes <span class="count" id="eventsPendingCount"></span></h2>
+        <button id="btnAckAll" class="btn hidden">Marcar tudo como visto</button>
+      </div>
+      <ul id="eventsList" class="events-list">
+        <li class="muted">Nenhuma atualização registrada ainda.</li>
+      </ul>
+
+      <details class="history-details">
+        <summary>Histórico (já verificadas) <span class="count" id="historyCount"></span></summary>
+        <ul id="historyList" class="events-list history-list"></ul>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Consultar chamado</h2>
+      <p class="muted small">Veja todas as mudanças já registradas para um chamado específico — inclui histórico que já pode ter saído da lista "Atualizações recentes" acima (que fica limitada às últimas 200 mudanças no total, de todas as fontes).</p>
+      <div class="ticket-query">
+        <select id="queryTicketSource">
+          <option value="">Todas as fontes</option>
+          <option value="GLPI">GLPI</option>
+          <option value="Evolutize">Evolutize</option>
+          <option value="Movidesk">Movidesk</option>
+        </select>
+        <input type="text" id="queryTicketNumber" placeholder="Número do chamado" />
+        <button id="btnQueryTicket" class="btn">Buscar</button>
+      </div>
+      <ul id="queryTicketResult" class="events-list history-list"></ul>
+    </section>
+
+    <section class="card">
+      <h2>GLPI <span class="count" id="countGlpi"></span></h2>
+      <p id="errorGlpi" class="source-error hidden"></p>
+      <div class="table-filter">
+        <input type="text" id="filterGlpi" placeholder="Filtrar por ID, título, status ou requerente..." />
+        <label class="checkbox-row small">
+          <input type="checkbox" id="hideClosedGlpi" />
+          Ocultar encerrados/fechados
+        </label>
+      </div>
+      <table class="ticket-table" id="tableGlpi">
+        <thead><tr><th>ID</th><th>Título</th><th>Status</th><th>Requerente</th><th>Última atualização</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Evolutize <span class="count" id="countEvo"></span></h2>
+      <p id="errorEvo" class="source-error hidden"></p>
+      <div class="table-filter">
+        <input type="text" id="filterEvo" placeholder="Filtrar por número, título ou situação..." />
+        <label class="checkbox-row small">
+          <input type="checkbox" id="hideClosedEvo" />
+          Ocultar encerrados
+        </label>
+      </div>
+      <table class="ticket-table" id="tableEvo">
+        <thead><tr><th>Número</th><th>Título</th><th>Situação</th><th>Última tramitação</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Movidesk (Keyrus) <span class="count" id="countMd"></span></h2>
+      <p id="errorMd" class="source-error hidden"></p>
+      <table class="ticket-table" id="tableMd">
+        <thead><tr><th>Número</th><th>Título</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Avulsos acompanhados</h2>
+      <div class="avulsos-status-grid">
+        <div>
+          <h3>GLPI</h3>
+          <ul id="glpiAvulsoStatus" class="avulso-status-list"></ul>
+        </div>
+        <div>
+          <h3>Evolutize</h3>
+          <ul id="evoAvulsoStatus" class="avulso-status-list"></ul>
+        </div>
+        <div>
+          <h3>Movidesk</h3>
+          <ul id="mdAvulsoStatus" class="avulso-status-list"></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
