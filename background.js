@@ -71,10 +71,11 @@ const DEFAULT_CONFIG = {
   // pelo dashboard.js pra renderizar links, o background.js nunca lê isso.
   customLinks: [],
   // URL de um arquivo version.json hospedado no repositório do GitHub do Hub (ver
-  // checkForUpdate) — vazio = aviso de versão nova desativado. Preenchido manualmente
-  // nas Configurações, já que cada instalação pode apontar pra um repositório diferente
-  // (ex: um fork de um colega).
-  updateCheckUrl: '',
+  // checkForUpdate). Já vem preenchido de fábrica com o repositório oficial — assim
+  // qualquer instalação nova (a sua ou de um colega) já nasce com o aviso de versão
+  // ativado, sem precisar configurar nada na mão. Continua editável nas Configurações
+  // (ex: pra apontar pra um fork, ou deixar em branco pra desativar o aviso).
+  updateCheckUrl: 'https://raw.githubusercontent.com/batistela/hub-chamados/main/version.json',
 };
 
 // ---------- utilidades de storage ----------
