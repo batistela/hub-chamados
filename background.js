@@ -70,12 +70,8 @@ const DEFAULT_CONFIG = {
   // Atalhos puros (label + URL) pra outros sistemas que o Hub não monitora — só usados
   // pelo dashboard.js pra renderizar links, o background.js nunca lê isso.
   customLinks: [],
-  // URL de um arquivo version.json hospedado no repositório do GitHub do Hub (ver
-  // checkForUpdate). Já vem preenchido de fábrica com o repositório oficial — assim
-  // qualquer instalação nova (a sua ou de um colega) já nasce com o aviso de versão
-  // ativado, sem precisar configurar nada na mão. Continua editável nas Configurações
-  // (ex: pra apontar pra um fork, ou deixar em branco pra desativar o aviso).
-  updateCheckUrl: 'https://raw.githubusercontent.com/batistela/hub-chamados/main/version.json',
+  // Não tem mais um campo "updateCheckUrl" aqui — o link do version.json (aviso de
+  // versão nova) agora é fixo no código, ver UPDATE_CHECK_URL mais abaixo.
 };
 
 // ---------- utilidades de storage ----------
@@ -217,12 +213,12 @@ chrome.runtime.onInstalled.addListener(async () => {
   const config = await getConfig();
   await setConfig(config);
   await ensureAlarm();
-  checkForUpdate(config).catch((e) => console.warn('checkForUpdate falhou', e));
+  checkForUpdate().catch((e) => console.warn('checkForUpdate falhou', e));
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   ensureAlarm();
-  checkForUpdate(await getConfig()).catch((e) => console.warn('checkForUpdate falhou', e));
+  checkForUpdate().catch((e) => console.warn('checkForUpdate falhou', e));
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -660,6 +656,11 @@ function checkStaleTickets(config, state) {
 // GitHub e, se tiver uma versão mais nova, guarda um aviso pro dashboard.js mostrar,
 // com link pra pegar a atualização.
 
+// Fixo no código de propósito — não é uma opção de configuração (não tem campo pra isso
+// no Hub). É o repositório oficial do projeto; só faz sentido mudar isso editando o
+// código mesmo (ex: se o repositório for renomeado ou movido).
+const UPDATE_CHECK_URL = 'https://raw.githubusercontent.com/batistela/hub-chamados/main/version.json';
+
 // Comparação numérica por partes (1.9.0 < 1.10.0) — comparar como texto puro erraria
 // esse caso ("1.10.0" < "1.9.0" alfabeticamente).
 function compareVersions(a, b) {
@@ -678,16 +679,12 @@ function compareVersions(a, b) {
 // suficiente pra avisar rápido sem gerar tráfego à toa.
 const UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
-async function checkForUpdate(config) {
-  if (!config.updateCheckUrl) {
-    await chrome.storage.local.set({ updateInfo: null });
-    return;
-  }
+async function checkForUpdate() {
   const { lastUpdateCheckTs } = await chrome.storage.local.get('lastUpdateCheckTs');
   if (lastUpdateCheckTs && Date.now() - lastUpdateCheckTs < UPDATE_CHECK_INTERVAL_MS) return;
   await chrome.storage.local.set({ lastUpdateCheckTs: Date.now() });
   try {
-    const res = await fetch(config.updateCheckUrl, { cache: 'no-store' });
+    const res = await fetch(UPDATE_CHECK_URL, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const current = chrome.runtime.getManifest().version;
@@ -767,7 +764,7 @@ async function runCheck() {
     // Não depende da janela/aba de trabalho (é só um fetch direto) e não deve travar a
     // checagem de chamados se falhar — por isso roda solto aqui, com seu próprio
     // try/catch interno (ver checkForUpdate).
-    checkForUpdate(config).catch((e) => console.warn('checkForUpdate falhou', e));
+    checkForUpdate().catch((e) => console.warn('checkForUpdate falhou', e));
 
     await withWorkerTab(async (tabId) => {
       // GLPI - lista principal (pulada se "só avulsos" estiver marcado)

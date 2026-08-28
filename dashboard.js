@@ -41,7 +41,8 @@ async function loadAll() {
 }
 
 // Aviso de versão nova disponível no repositório do GitHub (ver checkForUpdate em
-// background.js) — só aparece quando updateCheckUrl está configurado E a versão do
+// background.js) — a URL do version.json é fixa no código do background.js, não tem
+// campo de configuração aqui. Esse aviso só aparece quando a versão do
 // version.json é mais nova que a instalada. O botão "Baixar" só baixa o .zip pra pasta
 // Downloads (é o máximo que a permissão "downloads" do Chrome permite) — a extensão não
 // consegue descompactar nem substituir os arquivos sozinha (o Chrome bloqueia isso de
@@ -97,7 +98,6 @@ function renderConfig(config) {
   el('soundEnabled').checked = config.soundEnabled !== false;
   el('glpiSearchUrl').value = config.glpiSearchUrl || '';
   el('staleDays').value = config.staleDays ?? 0;
-  el('updateCheckUrl').value = config.updateCheckUrl || '';
   el('glpiOnlyAvulsos').checked = !!config.glpiOnlyAvulsos;
   el('evolutizeOnlyAvulsos').checked = !!config.evolutizeOnlyAvulsos;
   el('movideskOnlyAvulsos').checked = !!config.movideskOnlyAvulsos;
@@ -506,7 +506,6 @@ el('btnSaveConfig').addEventListener('click', async () => {
   let staleDays = staleRaw === '' ? 0 : Number(staleRaw);
   if (!Number.isFinite(staleDays) || staleDays < 0) staleDays = 0;
   config.staleDays = Math.min(365, staleDays);
-  config.updateCheckUrl = el('updateCheckUrl').value.trim();
   await chrome.storage.local.set({ config });
   await chrome.runtime.sendMessage({ type: 'updateInterval', minutes });
   el('btnSaveConfig').textContent = 'Salvo!';
@@ -523,7 +522,7 @@ const CONFIG_FIELDS = [
   'glpiAvulsos', 'glpiOnlyAvulsos', 'glpiAvulsoStaleDays',
   'evolutizeAvulsos', 'evolutizeOnlyAvulsos', 'evolutizeAvulsoUrls', 'evolutizeAvulsoStaleDays',
   'movideskAvulsos', 'movideskOnlyAvulsos', 'movideskAvulsoStaleDays',
-  'staleDays', 'customLinks', 'updateCheckUrl',
+  'staleDays', 'customLinks',
 ];
 
 function showImportStatus(message, isError) {
@@ -587,7 +586,6 @@ function sanitizeImportedConfig(incoming) {
     movideskAvulsoStaleDays: asPlainObject(incoming.movideskAvulsoStaleDays),
     staleDays: asNumber(incoming.staleDays),
     customLinks: asCustomLinks(incoming.customLinks),
-    updateCheckUrl: asString(incoming.updateCheckUrl),
   };
   // Remove campos que não bateram na validação, pra não sobrescrever o que já estava
   // salvo com "undefined".
