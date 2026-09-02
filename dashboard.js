@@ -16,6 +16,33 @@ const tableFilters = {
 const CLOSED_STATUS_RE = /encerr|fechad|solucion|resolvid|cancel|conclu[ií]d/i;
 let lastState = {};
 
+// ---------- tema claro/escuro ----------
+// Guardado em uma chave própria do storage (não dentro de `config`) — é preferência
+// pessoal de exibição, não configuração operacional, então fica de fora do
+// exportar/importar configurações. `null`/ausente = "automático" (segue
+// prefers-color-scheme do sistema, via CSS); 'light'/'dark' = escolha manual, que
+// sempre vence a preferência do sistema (ver dashboard.css).
+function setThemeAttr(theme) {
+  if (theme === 'dark' || theme === 'light') {
+    document.documentElement.dataset.theme = theme;
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
+  const btn = el('btnToggleTheme');
+  if (btn) {
+    btn.textContent = theme === 'dark' ? '☀️' : theme === 'light' ? '🌙' : '🌓';
+    btn.title =
+      theme === 'dark' ? 'Tema escuro (clique para claro)' :
+      theme === 'light' ? 'Tema claro (clique para escuro)' :
+      'Tema automático (clique para claro)';
+  }
+}
+async function applyStoredTheme() {
+  const { uiTheme } = await chrome.storage.local.get('uiTheme');
+  setThemeAttr(uiTheme || null);
+}
+applyStoredTheme();
+
 function fmtTime(ts) {
   if (!ts) return 'Nunca verificado';
   const d = new Date(ts);
@@ -708,8 +735,23 @@ el('queryTicketNumber').addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter') runTicketQuery();
 });
 
+el('btnToggleTheme').addEventListener('click', async () => {
+  const { uiTheme } = await chrome.storage.local.get('uiTheme');
+  // Ciclo: automático (segue o sistema) → claro → escuro → automático de novo.
+  const next = uiTheme === 'light' ? 'dark' : uiTheme === 'dark' ? null : 'light';
+  if (next) {
+    await chrome.storage.local.set({ uiTheme: next });
+  } else {
+    await chrome.storage.local.remove('uiTheme');
+  }
+  setThemeAttr(next);
+});
+
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local') loadAll();
+  if (area !== 'local') return;
+  // Mantém outras abas do Hub abertas em sincronia se o tema for trocado em uma delas.
+  if (changes.uiTheme) setThemeAttr(changes.uiTheme.newValue || null);
+  loadAll();
 });
 
 loadAll();
