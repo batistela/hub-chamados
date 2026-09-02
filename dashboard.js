@@ -376,7 +376,12 @@ function buildEventLi(e, withAckButton) {
   const link = eventLinkFor(e);
   const idLabel = `[${e.source}] ${e.id}`;
   const idPart = link ? `<a href="${link}" target="_blank">${idLabel}</a>` : idLabel;
-  body.innerHTML = `<strong>${idPart}</strong> — ${e.title || ''}<br>${e.detail}<div class="event-meta">${fmtEventTime(e.ts)}</div>`;
+  // "Hub verificou em" é de propósito, não só a hora crua — esse horário é de quando o
+  // HUB rodou a checagem, não de quando o chamado foi atualizado na fonte (GLPI,
+  // Evolutize, etc). Quando a fonte informa a data/hora real da última tramitação, ela
+  // já vem embutida em `e.detail` (ver lastUpdateSuffix em background.js) — é essa data
+  // que vale a pena conferir na aba de histórico da própria fonte, não a daqui.
+  body.innerHTML = `<strong>${idPart}</strong> — ${e.title || ''}<br>${e.detail}<div class="event-meta">Hub verificou em: ${fmtEventTime(e.ts)}</div>`;
   li.appendChild(body);
   if (withAckButton) {
     const btn = document.createElement('button');

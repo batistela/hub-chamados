@@ -458,6 +458,20 @@ function toMap(list) {
   return m;
 }
 
+// Monta um sufixo tipo " (última tramitação segundo o GLPI: 19/08/2026 14:32)" pra
+// anexar no detalhe do evento. Existe porque a data/hora que aparece normalmente no
+// evento (fmtEventTime no dashboard.js) é de quando o HUB checou — não de quando o
+// chamado foi de fato atualizado na fonte. Isso gerava confusão na hora de conferir um
+// evento suspeito no histórico da própria fonte (ex: aba "Histórico" do GLPI): sem essa
+// data, não dá pra saber qual horário procurar lá. Só aparece quando a fonte realmente
+// captura essa informação (hoje: GLPI e Evolutize) — pra Movidesk, que não tem, o
+// sufixo fica vazio.
+function lastUpdateSuffix(data) {
+  if (!data || !data.lastUpdate) return '';
+  const who = data.lastUpdateBy ? ` por ${data.lastUpdateBy}` : '';
+  return ` (última tramitação segundo a fonte: ${data.lastUpdate}${who})`;
+}
+
 function diffListSource(sourceLabel, prevMap, nextList, opts = {}) {
   const events = [];
   const rawNextMap = toMap(nextList);
@@ -466,7 +480,7 @@ function diffListSource(sourceLabel, prevMap, nextList, opts = {}) {
     const next = rawNextMap[id];
     const prev = prevMap[id];
     if (!prev) {
-      events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'novo', detail: `Passou a aparecer na lista (status: ${next.status || '—'})` });
+      events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'novo', detail: `Passou a aparecer na lista (status: ${next.status || '—'})${lastUpdateSuffix(next)}` });
       nextMap[id] = next;
       continue;
     }
@@ -484,7 +498,7 @@ function diffListSource(sourceLabel, prevMap, nextList, opts = {}) {
         nextMap[id] = prev;
         continue;
       }
-      events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'status', detail: `${prev.status || '—'} → ${next.status || '—'}` });
+      events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'status', detail: `${prev.status || '—'} → ${next.status || '—'}${lastUpdateSuffix(next)}` });
       nextMap[id] = next;
       continue;
     }
@@ -499,7 +513,7 @@ function diffListSource(sourceLabel, prevMap, nextList, opts = {}) {
   }
   for (const id of Object.keys(prevMap)) {
     if (!rawNextMap[id]) {
-      events.push({ source: sourceLabel, id, title: prevMap[id].title, url: prevMap[id].url || null, change: 'sumiu', detail: 'Não aparece mais na lista (provavelmente foi encerrado/concluído)' });
+      events.push({ source: sourceLabel, id, title: prevMap[id].title, url: prevMap[id].url || null, change: 'sumiu', detail: `Não aparece mais na lista (provavelmente foi encerrado/concluído)${lastUpdateSuffix(prevMap[id])}` });
     }
   }
   return { nextMap, events };
@@ -516,7 +530,7 @@ function diffAvulsoSource(sourceLabel, prevMap, nextMap) {
       continue;
     }
     if (!prev) {
-      events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'acompanhando', detail: 'Adicionado à lista de avulsos' });
+      events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'acompanhando', detail: `Adicionado à lista de avulsos${lastUpdateSuffix(next)}` });
       resultMap[id] = next;
       continue;
     }
@@ -530,7 +544,7 @@ function diffAvulsoSource(sourceLabel, prevMap, nextMap) {
         resultMap[id] = prev;
         continue;
       }
-      events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'status', detail: `${prev.status} → ${next.status}` });
+      events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'status', detail: `${prev.status} → ${next.status}${lastUpdateSuffix(next)}` });
       resultMap[id] = next;
       continue;
     }
