@@ -661,6 +661,102 @@ function checkStaleTickets(config, state) {
   return { events, staleAlerted: nextAlerted };
 }
 
+// ---------- histórico diário (snapshot pra gráfico de tendência) ----------
+// Guarda, uma vez por dia, um RESUMO pequeno do estado (total/abertos/encerrados/
+// parados por fonte) — não os chamados inteiros. É o que alimenta o gráfico de
+// tendência na página de métricas; sem isso, o Hub só sabe o estado ATUAL, nunca
+// consegue mostrar "como estava há duas semanas", porque `state` é sobrescrito a cada
+// checagem e `events` só registra mudanças pontuais, não uma fotografia completa.
+
+function localDateStr(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Conta quantos chamados do mapa de uma fonte estão parados AGORA, segundo o padrão
+// geral configurado (staleDays). É uma versão simplificada do que checkStaleTickets faz
+// pra decidir se dispara alerta — aqui só queremos o total corrente pro snapshot, sem
+// mexer no dedup de alerta (staleAlerted) nem considerar overrides por avulso (o
+// snapshot é sobre a lista principal; um resumo diário não precisa desse nível de
+// detalhe pra ser útil como tendência).
+function countStaleNow(config, map) {
+  const globalDays = Number(config.staleDays) > 0 ? Number(config.staleDays) : null;
+  if (!globalDays) return 0;
+  let count = 0;
+  for (const data of Object.values(map || {})) {
+    if (!data || data.error) continue;
+    const days = daysSinceUpdate(data.lastUpdate);
+    if (days == null) continue;
+    if (days >= globalDays) count++;
+  }
+  return count;
+}
+
+function summarizeSourceForSnapshot(map) {
+  const entries = Object.values(map || {});
+  let abertos = 0;
+  let encerrados = 0;
+  for (const t of entries) {
+    if (CLOSED_STATUS_RE.test(t.status || '')) encerrados++;
+    else abertos++;
+  }
+  return { total: entries.length, abertos, encerrados };
+}
+
+function buildDailySnapshot(dateStr, config, state, approximated) {
+  return {
+    date: dateStr,
+    approximated: !!approximated,
+    glpi: { ...summarizeSourceForSnapshot(state.glpi), parados: countStaleNow(config, state.glpi) },
+    evolutize: { ...summarizeSourceForSnapshot(state.evolutize), parados: countStaleNow(config, state.evolutize) },
+    movidesk: { ...summarizeSourceForSnapshot(state.movidesk), parados: countStaleNow(config, state.movidesk) },
+  };
+}
+
+const SNAPSHOT_RETENTION_DAYS = 365;
+
+// Roda em toda checagem (não precisa de alarme próprio). Duas coisas, nessa ordem:
+// 1) se falta o snapshot de ONTEM, salva agora usando o estado atual como aproximação
+//    (sinal de que o Chrome esteve fechado no fim do dia anterior) — só recupera o dia
+//    imediatamente anterior, nunca uma sequência inteira de dias perdidos (ver
+//    explicação completa dada ao Murilo: aproximar um único dia é razoável, encadear
+//    vários já não seria confiável).
+// 2) se ainda não tem o de HOJE e já são 17h ou mais (horário local), salva o de hoje —
+//    esse já não é aproximado, é a leitura "de verdade" do fim do dia.
+async function maybeSnapshotDaily(config, state) {
+  const { dailySnapshots } = await chrome.storage.local.get('dailySnapshots');
+  const snapshots = dailySnapshots || {};
+  const now = new Date();
+  const todayStr = localDateStr(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = localDateStr(yesterday);
+
+  let changed = false;
+  if (!snapshots[yesterdayStr]) {
+    snapshots[yesterdayStr] = buildDailySnapshot(yesterdayStr, config, state, true);
+    changed = true;
+  }
+  if (!snapshots[todayStr] && now.getHours() >= 17) {
+    snapshots[todayStr] = buildDailySnapshot(todayStr, config, state, false);
+    changed = true;
+  }
+  if (!changed) return;
+
+  // Poda qualquer coisa mais velha que a retenção — comparação por string funciona
+  // porque o formato YYYY-MM-DD já ordena igual cronologicamente.
+  const cutoff = new Date(now);
+  cutoff.setDate(cutoff.getDate() - SNAPSHOT_RETENTION_DAYS);
+  const cutoffStr = localDateStr(cutoff);
+  for (const d of Object.keys(snapshots)) {
+    if (d < cutoffStr) delete snapshots[d];
+  }
+
+  await chrome.storage.local.set({ dailySnapshots: snapshots });
+}
+
 // ---------- checagem de versão nova (GitHub) ----------
 // A extensão está instalada via "Load unpacked" (modo desenvolvedor) — esse modo não
 // tem nenhum mecanismo de auto-update oferecido pelo Chrome (isso só existe pra
@@ -889,6 +985,15 @@ async function runCheck() {
     const stale = checkStaleTickets(config, state);
     state.staleAlerted = stale.staleAlerted;
     allEvents.push(...stale.events);
+
+    // Mesma lógica: só depois do state consolidado, pra o snapshot refletir o resultado
+    // final da checagem (não um estado parcial). Tem seu próprio try/catch — uma falha
+    // aqui não pode derrubar o resto da checagem de chamados.
+    try {
+      await maybeSnapshotDaily(config, state);
+    } catch (e) {
+      console.warn('maybeSnapshotDaily falhou', e);
+    }
 
     await setState(state);
     const mergedEvents = await pushEvents(allEvents);
