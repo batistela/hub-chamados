@@ -59,7 +59,15 @@ export function extractGLPIList() {
 
 export function extractGLPIAvulso() {
   const title = (document.title || '').replace(/\s+-\s+GLPI$/, '').trim();
-  const bodyText = document.body ? document.body.innerText || '' : '';
+  let bodyText = document.body ? document.body.innerText || '' : '';
+  // Mitigação parcial pra um falso-positivo conhecido: o hash pega a página inteira, e
+  // isso inclui qualquer texto de data/hora RELATIVA que o GLPI recalcula sozinho a cada
+  // carregamento (ex: "há 3 minutos" em algum widget/menu não relacionado ao chamado em
+  // si) — sem isso, a mera passagem do tempo já muda o hash mesmo sem nada mudar no
+  // chamado. Isso não resolve 100% (a causa raiz pode ser outra coisa na página, ainda
+  // sob investigação — ver conversa com o Murilo), mas remove uma fonte de ruído comum e
+  // conhecida sem precisar restringir a um seletor específico que ainda não confirmamos.
+  bodyText = bodyText.replace(/há\s+\d+\s+(segundo|minuto|hora|dia|semana|m[êe]s(?:es)?|ano)s?(\s+atr[áa]s)?/gi, '');
   let hash = 0;
   for (let i = 0; i < bodyText.length; i++) hash = (hash * 31 + bodyText.charCodeAt(i)) >>> 0;
   const notFound = /não existe|not found|erro/i.test(title) && bodyText.length < 200;
