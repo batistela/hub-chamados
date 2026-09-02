@@ -1,62 +1,228 @@
-/* Estende dashboard.css — só o que é específico das telas de gráfico/métricas fica aqui,
-   pra reaproveitar cards/topbar/botões/tema já definidos lá. */
+/* Estende dashboard.css — só o que é específico da tela de métricas/BI fica aqui, pra
+   reaproveitar cards/topbar/botões/tema já definidos lá.
+
+   Paleta categórica (GLPI/Evolutize/Movidesk e os 6 tipos de evento) validada com o
+   script de acessibilidade do skill de dataviz — 3 e 6 fatias, ambos os modos, ΔE de
+   separação (CVD e visão normal) acima do piso e dentro da banda de luminosidade. Onde
+   o contraste de uma fatia contra o fundo ficou abaixo de 3:1 (aqua/amarelo/magenta no
+   modo claro), o alívio é textual: essas cores nunca carregam texto sozinhas, só
+   aparecem em marcas (linha/barra/swatch) ao lado de um rótulo em tinta neutra. */
 
 :root {
-  --chart-1: #4f46e5;
-  --chart-2: #0ea5e9;
-  --chart-3: #ea580c;
-  --chart-parado: #64748b;
-  --chart-grid: #e2e4e9;
-  --chart-axis-text: #6b7280;
+  /* fontes monitoradas — ordem fixa, nunca muda de cor por filtro/ranking */
+  --series-glpi: #2a78d6;
+  --series-evolutize: #eb6834;
+  --series-movidesk: #1baf7a;
+
+  /* tipos de evento na "Atividade recente" — ordem fixa própria (ver metrics.js) */
+  --activity-atualizacao: #2a78d6;
+  --activity-parado: #eb6834;
+  --activity-novo: #1baf7a;
+  --activity-status: #eda100;
+  --activity-acompanhando: #e87ba4;
+  --activity-sumiu: #008300;
+
+  /* status (só usado quando a cor representa "bom/ruim", nunca como 4ª série) */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  --chart-grid: #e1e0d9;
+  --chart-baseline: #c3c2b7;
+  --chart-axis-text: #898781;
+  --chart-surface: #fcfcfb;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --chart-1: #a5b4fc;
-    --chart-2: #7dd3fc;
-    --chart-3: #fdba74;
-    --chart-parado: #94a3b8;
-    --chart-grid: #2e323b;
-    --chart-axis-text: #9198a6;
+    --series-glpi: #3987e5;
+    --series-evolutize: #d95926;
+    --series-movidesk: #199e70;
+    --activity-atualizacao: #3987e5;
+    --activity-parado: #d95926;
+    --activity-novo: #199e70;
+    --activity-status: #c98500;
+    --activity-acompanhando: #d55181;
+    --activity-sumiu: #008300;
+    --chart-grid: #2c2c2a;
+    --chart-baseline: #383835;
+    --chart-axis-text: #898781;
+    --chart-surface: #1a1a19;
   }
 }
 :root[data-theme="dark"] {
-  --chart-1: #a5b4fc;
-  --chart-2: #7dd3fc;
-  --chart-3: #fdba74;
-  --chart-parado: #94a3b8;
-  --chart-grid: #2e323b;
-  --chart-axis-text: #9198a6;
+  --series-glpi: #3987e5;
+  --series-evolutize: #d95926;
+  --series-movidesk: #199e70;
+  --activity-atualizacao: #3987e5;
+  --activity-parado: #d95926;
+  --activity-novo: #199e70;
+  --activity-status: #c98500;
+  --activity-acompanhando: #d55181;
+  --activity-sumiu: #008300;
+  --chart-grid: #2c2c2a;
+  --chart-baseline: #383835;
+  --chart-axis-text: #898781;
+  --chart-surface: #1a1a19;
 }
 
-.chart-svg {
-  width: 100%;
-  height: 220px;
-  display: block;
+/* ---------- barra de filtros (período + fontes) ---------- */
+/* Uma única linha, acima de tudo que ela afeta — nunca um filtro por gráfico (cada
+   gráfico voltaria a mostrar um recorte diferente, e os números parariam de bater
+   entre si). */
+
+.filter-bar { padding: 14px 24px; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; }
+.filter-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.filter-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+.pill-group, .chip-group { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.pill {
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
 }
-.chart-grid { stroke: var(--chart-grid); stroke-width: 1; }
+.pill:hover { background: var(--hover-bg); }
+.pill.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 12px 5px 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.chip:hover { background: var(--hover-bg); }
+.chip.active { color: var(--text); border-color: var(--text); }
+.chip.active .chip-dot { opacity: 1; }
+.chip .chip-dot { width: 9px; height: 9px; border-radius: 50%; opacity: 0.25; flex-shrink: 0; }
+
+/* ---------- KPIs (stat tiles) ---------- */
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+.kpi-tile {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.kpi-label .chip-dot { width: 8px; height: 8px; border-radius: 50%; }
+.kpi-value { font-size: 28px; font-weight: 600; line-height: 1; }
+.kpi-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.kpi-delta { font-size: 12px; white-space: nowrap; }
+.kpi-delta.up-bad, .kpi-delta.down-bad { color: var(--status-critical); }
+.kpi-delta.up-good, .kpi-delta.down-good { color: var(--status-good); }
+.kpi-delta.flat { color: var(--muted); }
+.kpi-sparkline { width: 84px; height: 26px; display: block; flex-shrink: 0; }
+
+/* ---------- gráficos de linha ---------- */
+
+.chart-wrap { position: relative; }
+.chart-svg { width: 100%; height: 220px; display: block; }
+.chart-grid-line { stroke: var(--chart-grid); stroke-width: 1; }
+.chart-baseline-line { stroke: var(--chart-baseline); stroke-width: 1; }
 .chart-axis-label { fill: var(--chart-axis-text); font-size: 10px; }
+.chart-crosshair { stroke: var(--chart-baseline); stroke-width: 1; pointer-events: none; }
+.chart-hit-layer { fill: transparent; cursor: crosshair; }
 
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
-  margin-top: 8px;
+  gap: 6px;
+  margin-top: 10px;
   font-size: 12px;
   color: var(--muted);
 }
-.chart-legend .swatch {
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 9px 3px 7px;
+  cursor: pointer;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+.legend-item:hover { background: var(--hover-bg); }
+.legend-item.isolated { border-color: var(--border); color: var(--text); background: var(--subtle-bg); }
+.legend-item.dimmed { opacity: 0.4; }
+.legend-item .swatch {
   display: inline-block;
   width: 10px;
   height: 10px;
   border-radius: 2px;
-  margin-right: 5px;
-  vertical-align: middle;
+  flex-shrink: 0;
 }
+.legend-item.line .swatch { border-radius: 0; height: 2px; width: 12px; margin-top: 4px; align-self: flex-start; }
+
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  min-width: 140px;
+  z-index: 4;
+  transform: translateX(-50%);
+}
+.chart-tooltip[hidden] { display: none; }
+.chart-tooltip .tt-date { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+.chart-tooltip .tt-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.chart-tooltip .tt-row + .tt-row { margin-top: 3px; }
+.chart-tooltip .tt-key { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.chart-tooltip .tt-key .swatch-line { width: 10px; height: 2px; flex-shrink: 0; }
+.chart-tooltip .tt-key .swatch-box { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+.chart-tooltip .tt-value { font-weight: 600; color: var(--text); }
+.chart-tooltip .tt-approx { color: var(--muted); font-size: 10.5px; margin-top: 4px; }
+
+.chart-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+.chart-table th, .chart-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.chart-table th { color: var(--muted); font-weight: 600; font-size: 11.5px; }
+.chart-table[hidden] { display: none; }
+
+.btn.small { padding: 5px 10px; font-size: 12px; }
+.btn.ghost { background: none; }
+
+/* ---------- atividade recente (barras empilhadas) ---------- */
 
 .activity-chart {
   display: flex;
   align-items: stretch;
-  gap: 6px;
+  gap: 4px;
   height: 160px;
   padding-top: 8px;
 }
@@ -65,7 +231,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-width: 8px;
+  min-width: 6px;
+  cursor: pointer;
 }
 .activity-col-wrap {
   flex: 1;
@@ -74,8 +241,12 @@
   border-radius: 3px 3px 0 0;
   overflow: hidden;
   background: var(--subtle-bg);
+  outline-offset: 1px;
 }
+.activity-day.selected .activity-col-wrap { outline: 2px solid var(--primary); }
+.activity-day:hover .activity-col-wrap { filter: brightness(1.08); }
 .activity-seg { width: 100%; }
+.activity-seg:hover { filter: brightness(1.15); }
 .activity-day-label {
   text-align: center;
   font-size: 10px;
@@ -83,9 +254,64 @@
   margin-top: 4px;
 }
 
+.day-detail {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.day-detail[hidden] { display: none; }
+.day-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.day-detail-header h3 { margin: 0; font-size: 13px; }
+
+/* ---------- rankings (quem edita mais / requerentes) ---------- */
+
 .hbar-list { display: flex; flex-direction: column; gap: 8px; }
-.hbar-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.hbar-name { width: 180px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  border-radius: 6px;
+  text-align: left;
+  width: 100%;
+  font-family: inherit;
+}
+.hbar-row:hover { background: var(--hover-bg); }
+.hbar-row.active { background: var(--subtle-bg); outline: 1px solid var(--border); }
+.hbar-name { width: 180px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .hbar-track { flex: 1; background: var(--subtle-bg); border-radius: 4px; height: 14px; overflow: hidden; }
 .hbar-fill { height: 100%; background: var(--primary); border-radius: 4px; }
-.hbar-count { width: 32px; text-align: right; flex-shrink: 0; color: var(--muted); font-size: 12px; }
+.hbar-count { width: 32px; text-align: right; flex-shrink: 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.filter-chip-row { margin: 0 0 10px; min-height: 0; }
+.filter-chip-row:empty { margin: 0; }
+.active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--banner-info-bg);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 5px 8px 5px 12px;
+  font-size: 12.5px;
+}
+.active-filter-chip button {
+  border: none;
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  cursor: pointer;
+  font-size: 12px;
+}

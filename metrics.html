@@ -17,49 +17,89 @@
   </header>
 
   <main>
+    <section class="card filter-bar">
+      <div class="filter-row">
+        <div class="filter-group" role="group" aria-label="Período">
+          <span class="filter-label">Período</span>
+          <div class="pill-group" id="rangePills">
+            <button class="pill" data-range="7">7 dias</button>
+            <button class="pill active" data-range="30">30 dias</button>
+            <button class="pill" data-range="90">90 dias</button>
+            <button class="pill" data-range="365">365 dias</button>
+          </div>
+        </div>
+        <div class="filter-group" role="group" aria-label="Fontes">
+          <span class="filter-label">Fontes</span>
+          <div class="chip-group" id="sourceChips">
+            <button class="chip active" data-source="glpi"><span class="chip-dot" style="background:var(--series-glpi)"></span>GLPI</button>
+            <button class="chip active" data-source="evolutize"><span class="chip-dot" style="background:var(--series-evolutize)"></span>Evolutize</button>
+            <button class="chip active" data-source="movidesk"><span class="chip-dot" style="background:var(--series-movidesk)"></span>Movidesk</button>
+          </div>
+        </div>
+      </div>
+      <p class="muted small" style="margin:10px 0 0;">Esses filtros valem pra tudo abaixo — tendências, atividade e rankings sempre mostram o mesmo recorte.</p>
+    </section>
+
+    <div class="kpi-row" id="kpiRow"></div>
+
     <section class="card">
       <h2>Chamados parados agora <span class="count" id="countParados"></span></h2>
       <p class="muted small">Ordenado do mais parado pro mais recente. Só GLPI e Evolutize têm data de última tramitação disponível — Movidesk não entra nessa lista por esse motivo.</p>
+      <div class="filter-chip-row" id="paradosFilterChip"></div>
       <ul id="paradosList" class="events-list"></ul>
     </section>
 
     <section class="card">
       <div class="section-header">
         <h2>Tendência — chamados abertos por dia</h2>
-        <select id="rangeAbertos" class="btn">
-          <option value="7">7 dias</option>
-          <option value="30" selected>30 dias</option>
-          <option value="90">90 dias</option>
-          <option value="365">365 dias</option>
-        </select>
+        <button id="btnTableAbertos" class="btn small ghost">Ver como tabela</button>
       </div>
-      <svg id="chartAbertos" class="chart-svg"></svg>
+      <div class="chart-wrap" id="wrapAbertos">
+        <svg id="chartAbertos" class="chart-svg"></svg>
+        <div id="tooltipAbertos" class="chart-tooltip" hidden></div>
+      </div>
       <div id="legendAbertos" class="chart-legend"></div>
+      <table id="tableAbertos" class="chart-table" hidden></table>
       <p id="snapshotNote" class="muted small"></p>
     </section>
 
     <section class="card">
       <div class="section-header">
         <h2>Tendência — chamados parados por dia</h2>
-        <select id="rangeParados" class="btn">
-          <option value="7">7 dias</option>
-          <option value="30" selected>30 dias</option>
-          <option value="90">90 dias</option>
-          <option value="365">365 dias</option>
-        </select>
+        <button id="btnTableParados" class="btn small ghost">Ver como tabela</button>
       </div>
-      <svg id="chartParados" class="chart-svg"></svg>
+      <div class="chart-wrap" id="wrapParados">
+        <svg id="chartParados" class="chart-svg"></svg>
+        <div id="tooltipParados" class="chart-tooltip" hidden></div>
+      </div>
       <div id="legendParados" class="chart-legend"></div>
+      <table id="tableParados" class="chart-table" hidden></table>
     </section>
 
     <section class="card">
-      <h2>Atividade recente <span class="muted small">(últimos 14 dias, por tipo)</span></h2>
-      <div id="activityChart" class="activity-chart"></div>
+      <div class="section-header">
+        <h2>Atividade recente <span class="muted small" id="activitySubtitle">(por tipo de evento)</span></h2>
+        <button id="btnTableActivity" class="btn small ghost">Ver como tabela</button>
+      </div>
+      <p class="muted small">Separado por tipo de propósito — o Hub às vezes registra "mudanças" que na prática não têm nada de novo (ruído conhecido do GLPI); ver por tipo deixa esse ruído visível em vez de escondido dentro de um número só. Clique num dia pra ver os eventos daquele dia.</p>
+      <div class="chart-wrap" id="wrapActivity">
+        <div id="activityChart" class="activity-chart"></div>
+        <div id="tooltipActivity" class="chart-tooltip" hidden></div>
+      </div>
       <div id="legendActivity" class="chart-legend"></div>
+      <table id="tableActivity" class="chart-table" hidden></table>
+      <div id="dayDetail" class="day-detail" hidden>
+        <div class="day-detail-header">
+          <h3 id="dayDetailTitle"></h3>
+          <button id="btnCloseDayDetail" class="btn small ghost">Fechar</button>
+        </div>
+        <ul id="dayDetailList" class="events-list history-list"></ul>
+      </div>
     </section>
 
     <section class="card">
       <h2>Quem edita mais no GLPI <span class="muted small">(chamados na lista principal agora)</span></h2>
+      <p class="muted small">Clique num nome pra filtrar a lista de "chamados parados agora" só por ele.</p>
       <div id="editorsBars" class="hbar-list"></div>
     </section>
 
