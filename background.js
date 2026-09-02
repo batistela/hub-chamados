@@ -315,7 +315,7 @@ async function checkGLPIAvulsos(tabId, numbers) {
     const url = `${GLPI_BASE}/front/ticket.form.php?id=${encodeURIComponent(num)}`;
     await navigateAndWait(tabId, url);
     const data = await exec(tabId, extractGLPIAvulso);
-    out[num] = data || { title: '', hash: 0, notFound: true };
+    out[num] = data || { title: '', status: '', lastUpdate: '', notFound: true };
   }
   return out;
 }
@@ -445,7 +445,7 @@ async function checkMovideskAvulsos(tabId, numbers) {
     const url = `${MOVIDESK_BASE}/Ticket/Edit/${encodeURIComponent(num)}`;
     await navigateAndWait(tabId, url);
     const data = await exec(tabId, extractMovideskAvulso);
-    out[num] = data || { title: '', hash: 0, notFound: true };
+    out[num] = data || { title: '', status: '', lastUpdate: '', notFound: true };
   }
   return out;
 }
@@ -536,10 +536,12 @@ function diffAvulsoSource(sourceLabel, prevMap, nextMap) {
     }
     if (next.status && prev.status && prev.status !== next.status) {
       // Mesmo raciocínio do diffListSource: cruza com a última tramitação quando as duas
-      // leituras têm essa data (hoje: Evolutize avulso — GLPI/Movidesk avulso não
-      // capturam isso, então caem direto no comportamento de antes, sem cruzamento).
-      // Status parecendo diferente mas tramitação igual à da checagem anterior é sinal
-      // de leitura ruim, não de mudança real — mantém os dados antigos nesse caso.
+      // leituras têm essa data — hoje Evolutize sempre tem, e GLPI/Movidesk avulso têm
+      // quando conseguem achar isso na página de detalhe (best-effort, ver
+      // extractGLPIAvulso/extractMovideskAvulso); quando não conseguem, essa checagem
+      // simplesmente não se aplica e o evento de status segue direto. Status parecendo
+      // diferente mas tramitação igual à da checagem anterior é sinal de leitura ruim,
+      // não de mudança real — mantém os dados antigos nesse caso.
       if (next.lastUpdate && prev.lastUpdate && next.lastUpdate === prev.lastUpdate) {
         resultMap[id] = prev;
         continue;
@@ -548,26 +550,23 @@ function diffAvulsoSource(sourceLabel, prevMap, nextMap) {
       resultMap[id] = next;
       continue;
     }
-    // Quando temos "última tramitação" pra essa fonte (hoje só a Evolutize captura
-    // isso), é um sinal muito mais confiável de mudança de verdade do que o hash da
-    // página inteira — então confiamos só nele nesse caso e NÃO caímos pro hash.
-    // O hash pega qualquer diferença de texto na página, incluindo coisas que não têm
-    // nada a ver com o conteúdo do chamado (timestamps/widgets dinâmicos, ordem de
-    // anexos, etc.), o que gerava avisos de "conteúdo mudou" mesmo quando a última
-    // tramitação continuava sendo exatamente a mesma que o usuário já tinha visto.
-    if (next.lastUpdate || prev.lastUpdate) {
-      if (next.lastUpdate && prev.lastUpdate && next.lastUpdate !== prev.lastUpdate) {
-        const who = next.lastUpdateBy ? ` por ${next.lastUpdateBy}` : '';
-        events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'atualizacao', detail: `Nova tramitação em ${next.lastUpdate}${who}` });
-      }
-      resultMap[id] = next;
-      continue;
+    // Nova tramitação que não muda o status (ex: resposta do suporte que mantém a mesma
+    // situação) — hoje a Evolutize sempre captura "última tramitação", e o GLPI/Movidesk
+    // avulso capturam quando conseguem achar isso na página de detalhe (ver
+    // extractGLPIAvulso/extractMovideskAvulso).
+    if (next.lastUpdate && prev.lastUpdate && next.lastUpdate !== prev.lastUpdate) {
+      const who = next.lastUpdateBy ? ` por ${next.lastUpdateBy}` : '';
+      events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'atualizacao', detail: `Nova tramitação em ${next.lastUpdate}${who}` });
     }
-    // Sem "última tramitação" disponível pra essa fonte (GLPI/Movidesk avulso hoje) —
-    // aí sim o hash é o melhor sinal que temos.
-    if (prev.hash !== next.hash) {
-      events.push({ source: sourceLabel, id, title: next.title, url: next.url || null, change: 'atualizacao', detail: 'Conteúdo do chamado mudou — abra para conferir' });
-    }
+    // NÃO existe mais uma checagem de "conteúdo mudou" via hash da página inteira aqui —
+    // foi removida a pedido do Murilo. Ela pegava qualquer diferença de texto na página
+    // (timestamps relativos, widgets dinâmicos, ordem de anexos, etc.), sem relação
+    // necessária com o chamado em si, e por isso avisava demais — inclusive quando só o
+    // status tinha mudado (ex: pausado -> atribuído), o que já é coberto pelo bloco de
+    // status logo acima. Trade-off consciente: se uma fonte não conseguir capturar nem
+    // status nem "última atualização" pra um chamado avulso específico, esse chamado
+    // simplesmente para de gerar avisos de conteúdo — nunca mais um falso positivo, mas
+    // também nenhum aviso "eu não sei o quê, mas mudou algo".
     resultMap[id] = next;
   }
   return { resultMap, events };

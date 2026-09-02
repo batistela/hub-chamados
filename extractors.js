@@ -57,21 +57,66 @@ export function extractGLPIList() {
   return out;
 }
 
+// Antes essa função só devolvia um hash da página inteira, e o Hub usava "o hash mudou"
+// como sinal de "algo mudou no chamado, abra pra conferir" — só que o hash pega QUALQUER
+// diferença de texto na página (widgets dinâmicos, ordem de anexos, etc.), o que gerava
+// avisos de "conteúdo mudou" com frequência mesmo sem nada de novo pro Murilo conferir —
+// inclusive quando só o status tinha mudado (ex: pausado -> atribuído). A pedido dele,
+// isso foi substituído por dois sinais bem mais específicos: status (pra pegar mudança de
+// situação) e "última atualização" (pra pegar qualquer tramitação nova, igual já fazíamos
+// pro GLPI da lista principal e pra Evolutize) — sem hash nenhum.
+//
+// IMPORTANTE: os dois seletores/padrões abaixo são "melhor esforço" — não temos como
+// testar contra a instalação real de GLPI do Murilo antes de entregar. Se depois de subir
+// essa mudança os avulsos do GLPI pararem de detectar tramitação nova (status funcionando
+// mas "última atualização" nunca aparecendo), o próximo passo é o Murilo abrir um chamado
+// avulso no GLPI, dar Ctrl+F por "atualiza" na página, e me passar o texto exato que
+// aparece ali (rótulo + como a data é mostrada) pra eu ajustar o regex/seletor.
 export function extractGLPIAvulso() {
   const title = (document.title || '').replace(/\s+-\s+GLPI$/, '').trim();
-  let bodyText = document.body ? document.body.innerText || '' : '';
-  // Mitigação parcial pra um falso-positivo conhecido: o hash pega a página inteira, e
-  // isso inclui qualquer texto de data/hora RELATIVA que o GLPI recalcula sozinho a cada
-  // carregamento (ex: "há 3 minutos" em algum widget/menu não relacionado ao chamado em
-  // si) — sem isso, a mera passagem do tempo já muda o hash mesmo sem nada mudar no
-  // chamado. Isso não resolve 100% (a causa raiz pode ser outra coisa na página, ainda
-  // sob investigação — ver conversa com o Murilo), mas remove uma fonte de ruído comum e
-  // conhecida sem precisar restringir a um seletor específico que ainda não confirmamos.
-  bodyText = bodyText.replace(/há\s+\d+\s+(segundo|minuto|hora|dia|semana|m[êe]s(?:es)?|ano)s?(\s+atr[áa]s)?/gi, '');
-  let hash = 0;
-  for (let i = 0; i < bodyText.length; i++) hash = (hash * 31 + bodyText.charCodeAt(i)) >>> 0;
-  const notFound = /não existe|not found|erro/i.test(title) && bodyText.length < 200;
-  return { title, hash, length: bodyText.length, notFound };
+  const bodyText = document.body ? document.body.innerText || '' : '';
+
+  // Status: primeiro tenta o <select> do formulário do chamado (como o GLPI representa
+  // status na grande maioria das instalações/temas); se não achar, tenta uma "pastilha"
+  // de status com o nome no atributo title (outro padrão comum em temas do GLPI).
+  function readStatus() {
+    const select = document.querySelector('select[name="status"], select#status');
+    if (select && select.selectedIndex >= 0) {
+      const opt = select.options[select.selectedIndex];
+      if (opt && opt.text.trim()) return opt.text.trim();
+    }
+    const badge = document.querySelector('[class*="itilstatus"][title], [class*="status_"][title]');
+    if (badge) {
+      const t = (badge.getAttribute('title') || '').trim();
+      if (t) return t;
+    }
+    return '';
+  }
+
+  // Última atualização: em vez de depender de um elemento específico (que muda de tema
+  // pra tema), procura no texto da página por uma linha que comece com um rótulo
+  // conhecido ("Última atualização"/"Atualizado em"/etc.) e pega a data que aparece nela
+  // ou na linha seguinte — mais tolerante a diferenças de estrutura HTML.
+  function findLastUpdate() {
+    const lines = bodyText.split('\n').map((s) => s.trim()).filter(Boolean);
+    const labelRe = /^(última atualiza|ultima atualiza|atualizado em|dernière modification)/i;
+    const dateRe = /(\d{2}[\/\-]\d{2}[\/\-]\d{4}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?)/;
+    for (let i = 0; i < lines.length; i++) {
+      if (!labelRe.test(lines[i])) continue;
+      let m = lines[i].match(dateRe);
+      if (m) return m[1];
+      if (lines[i + 1]) {
+        m = lines[i + 1].match(dateRe);
+        if (m) return m[1];
+      }
+    }
+    return '';
+  }
+
+  const status = readStatus();
+  const lastUpdate = findLastUpdate();
+  const notFound = (/não existe|not found|erro/i.test(title) && bodyText.trim().length < 200) || (!title && !status && !lastUpdate);
+  return { title, status, lastUpdate, notFound };
 }
 
 export async function runEvolutizeList() {
@@ -281,10 +326,6 @@ export async function extractEvolutizeAvulsoDetail(number) {
     }
   }
 
-  const bodyText = document.body ? document.body.innerText || '' : '';
-  let hash = 0;
-  for (let i = 0; i < bodyText.length; i++) hash = (hash * 31 + bodyText.charCodeAt(i)) >>> 0;
-
   // O título da aba/documento nessa tela é sempre "Chamado <número>". Usamos isso pra
   // confirmar que a página realmente é a do chamado esperado — importante quando
   // chegamos aqui através de um link fixo salvo de uma busca anterior: se o token da
@@ -298,8 +339,6 @@ export async function extractEvolutizeAvulsoDetail(number) {
     status,
     lastUpdate,
     lastUpdateBy,
-    hash,
-    length: bodyText.length,
     url: location.href,
     matchesNumber,
   };
@@ -331,11 +370,13 @@ export async function extractMovideskAvulso() {
   const subjectEl = document.querySelector('.ticket-subject');
   const title = subjectEl ? subjectEl.innerText.trim() : '';
   const status = fieldValue('Status');
+  // Tentativa de pegar "última atualização" do mesmo jeito estruturado (campo com
+  // rótulo, igual ao Status acima) — se o Movidesk não expuser esse campo com um desses
+  // nomes exatos, fica vazio e essa fonte cai pro mesmo comportamento "só status" do
+  // GLPI avulso (sem hash de página inteira, que foi removido dos dois).
+  const lastUpdate = fieldValue('Última atualização') || fieldValue('Data da última atualização') || '';
   const notFound = !title && !status;
-  const bodyText = document.body ? document.body.innerText || '' : '';
-  let hash = 0;
-  for (let i = 0; i < bodyText.length; i++) hash = (hash * 31 + bodyText.charCodeAt(i)) >>> 0;
-  return { title, status, hash, notFound };
+  return { title, status, lastUpdate, notFound };
 }
 
 export async function runMovidesk() {
