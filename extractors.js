@@ -31,6 +31,10 @@ export function extractGLPIList() {
   // salva do GLPI (mesma lógica de "Última atualização") — se não estiver, essa coluna
   // simplesmente não é encontrada e o campo fica vazio (o Hub não quebra por isso).
   const iRequester = idxStartingWith(['REQUERENTE', 'SOLICITANTE', 'ABERTO POR']);
+  // Coluna "Última edição por" — adicionada na pesquisa salva pra alimentar o mesmo
+  // "quem" que já existia pra Evolutize (lastUpdateBy). Mesma lógica de tolerância a
+  // prefixo/duplicação de nome de grupo que as outras colunas opcionais.
+  const iUpdateBy = idxStartingWith(['ÚLTIMA EDIÇÃO POR', 'ÚLTIMO EDITOR', 'EDITADO POR', 'MODIFICADO POR']);
   const out = [];
   for (let r = 1; r < rows.length; r++) {
     const cells = Array.from(rows[r].querySelectorAll('td'));
@@ -38,7 +42,14 @@ export function extractGLPIList() {
     const get = (i) => (i >= 0 && cells[i] ? cells[i].innerText.trim() : '');
     const id = get(iId).replace(/\s+/g, '');
     if (!/^\d+$/.test(id)) continue;
-    out.push({ id, title: get(iTitle), status: get(iStatus), lastUpdate: get(iUpdate), requester: get(iRequester) });
+    out.push({
+      id,
+      title: get(iTitle),
+      status: get(iStatus),
+      lastUpdate: get(iUpdate),
+      lastUpdateBy: get(iUpdateBy),
+      requester: get(iRequester),
+    });
   }
   // A tabela existia e tinha linhas, mas nenhuma passou como um chamado válido — mesmo
   // sinal de alerta que os casos acima, então trata do mesmo jeito.

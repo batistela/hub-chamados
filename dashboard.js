@@ -236,7 +236,7 @@ async function removeCustomLink(idx) {
 }
 
 function renderState(state) {
-  fillTable('tableGlpi', 'countGlpi', state.glpi || {}, (id) => `${GLPI_BASE}/front/ticket.form.php?id=${id}`, ['title', 'status', 'requester', 'lastUpdate'], tableFilters.glpi);
+  fillTable('tableGlpi', 'countGlpi', state.glpi || {}, (id) => `${GLPI_BASE}/front/ticket.form.php?id=${id}`, ['title', 'status', 'requester', 'lastUpdate', 'lastUpdateBy'], tableFilters.glpi);
   fillTable('tableEvo', 'countEvo', state.evolutize || {}, null, ['title', 'status', 'lastUpdate'], tableFilters.evo);
   fillTable('tableMd', 'countMd', state.movidesk || {}, (id) => `${MOVIDESK_BASE}/Ticket/Edit/${id}`, ['title', 'status']);
 
@@ -254,7 +254,7 @@ function applyTableFilter(entries, filter) {
   const term = (filter.search || '').trim().toLowerCase();
   if (term) {
     out = out.filter(([id, data]) => {
-      const haystack = `${id} ${data.title || ''} ${data.status || ''} ${data.requester || ''}`.toLowerCase();
+      const haystack = `${id} ${data.title || ''} ${data.status || ''} ${data.requester || ''} ${data.lastUpdateBy || ''}`.toLowerCase();
       return haystack.includes(term);
     });
   }
