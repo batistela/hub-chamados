@@ -228,13 +228,25 @@ async function startPickingField(fieldKey) {
 
 // Injetada na aba de exemplo via chrome.scripting.executeScript — roda isolada, sem
 // acesso ao escopo daqui (por isso é totalmente self-contained, igual às funções de
-// extractors.js). Fica esperando o próximo clique numa célula de tabela (captura, então
-// intercepta ANTES de qualquer link/botão do próprio site reagir) e manda a coluna
-// (índice + texto do cabeçalho, se achar) de volta pro assistente via
-// chrome.runtime.sendMessage — disponível mesmo em scripts injetados assim, desde que a
-// extensão tenha permissão pro domínio (foi isso que pedimos antes de abrir essa aba).
+// extractors.js — os seletores CUSTOM_GRID_SEL/CUSTOM_ROW_SEL/CUSTOM_CELL_SEL de lá estão
+// duplicados aqui embaixo por esse mesmo motivo, não dá pra importar/referenciar). Fica
+// esperando o próximo clique numa célula (captura, então intercepta ANTES de qualquer
+// link/botão do próprio site reagir) e manda a coluna (índice + texto do cabeçalho, se
+// achar) de volta pro assistente via chrome.runtime.sendMessage — disponível mesmo em
+// scripts injetados assim, desde que a extensão tenha permissão pro domínio (foi isso que
+// pedimos antes de abrir essa aba).
+//
+// Reconhece tanto <table> de verdade quanto grades feitas com <div> + papéis ARIA
+// (role="grid"/"row"/"gridcell"/"columnheader" — padrão usado por vários componentes de
+// grade React/Fluent UI, incluindo listas modernas do SharePoint) — mesmo raciocínio já
+// aplicado em extractCustomListRows (extractors.js), pra a busca de verdade reconhecer o
+// que foi mapeado aqui.
 function injectPicker(fieldKey) {
   if (window.__hubPickerCleanup) window.__hubPickerCleanup();
+
+  const GRID_SEL = 'table, [role="grid"], [role="table"], [role="treegrid"]';
+  const ROW_SEL = 'tr, [role="row"]';
+  const CELL_SEL = 'td, th, [role="gridcell"], [role="columnheader"], [role="cell"], [role="rowheader"]';
 
   const HILITE = '2px solid #4f46e5';
   let lastEl = null;
@@ -273,8 +285,18 @@ function injectPicker(fieldKey) {
     return path.join(' > ');
   }
 
+  // Mesma lógica de rowsOf/cellsOf de extractCustomListRows: usa .closest() pra garantir
+  // que a linha/célula pertence mesmo à grade/linha em questão (evita pegar uma linha de
+  // uma sub-grade aninhada por engano).
+  function rowsOf(root) {
+    return Array.from(root.querySelectorAll(ROW_SEL)).filter((r) => r.closest(GRID_SEL) === root);
+  }
+  function cellsOf(row) {
+    return Array.from(row.querySelectorAll(CELL_SEL)).filter((c) => c.closest(ROW_SEL) === row);
+  }
+
   function onOver(e) {
-    const cell = e.target.closest('td, th');
+    const cell = e.target.closest(CELL_SEL);
     if (lastEl) lastEl.style.outline = '';
     lastEl = cell || null;
     if (lastEl) lastEl.style.outline = HILITE;
@@ -283,32 +305,37 @@ function injectPicker(fieldKey) {
   function onClick(e) {
     e.preventDefault();
     e.stopPropagation();
-    const cell = e.target.closest('td, th');
+    const cell = e.target.closest(CELL_SEL);
     if (!cell) {
       chrome.runtime.sendMessage({
         type: 'hubFieldPickError',
         field: fieldKey,
-        message: 'Clique dentro de uma célula da tabela (uma coluna de um chamado na lista) — pode tentar de novo.',
+        message: 'Clique dentro de uma célula da lista (uma coluna de um chamado) — pode tentar de novo.',
       });
       return; // não limpa — deixa tentar de novo sem precisar clicar "Selecionar" outra vez
     }
-    const table = cell.closest('table');
-    if (!table) {
+    const row = cell.closest(ROW_SEL);
+    const grid = row ? row.closest(GRID_SEL) : null;
+    if (!row || !grid) {
       cleanup();
       chrome.runtime.sendMessage({
         type: 'hubFieldPickError',
         field: fieldKey,
-        message: 'Essa célula não está dentro de uma <table> — esse modo só funciona com listas em formato de tabela.',
+        message:
+          'Não consegui identificar uma linha/tabela em volta dessa célula — esse site parece usar um formato de ' +
+          'lista diferente dos suportados (tabela HTML ou grade com papéis ARIA tipo as listas modernas do SharePoint).',
       });
       return;
     }
-    const row = cell.parentElement;
-    const columnIndex = Array.from(row.children).indexOf(cell);
-    const headRow = (table.tHead && table.tHead.rows[0]) || table.rows[0];
-    const headerCell = headRow ? headRow.cells[columnIndex] : null;
+    const cellsInRow = cellsOf(row);
+    const columnIndex = cellsInRow.indexOf(cell);
+    const rowsInGrid = rowsOf(grid);
+    const headRow = rowsInGrid[0];
+    const headerCells = headRow ? cellsOf(headRow) : [];
+    const headerCell = headerCells[columnIndex];
     const headerText = headerCell ? (headerCell.innerText || headerCell.textContent || '').trim() : '';
     const preview = (cell.innerText || cell.textContent || '').replace(/\s+/g, ' ').trim();
-    const tableSelector = buildSelector(table);
+    const tableSelector = buildSelector(grid);
     cleanup();
     chrome.runtime.sendMessage({ type: 'hubFieldPicked', field: fieldKey, tableSelector, columnIndex, headerText, preview });
   }

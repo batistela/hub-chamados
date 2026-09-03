@@ -1,5 +1,5 @@
 {
-  "version": "1.6.0",
-  "notes": "Avulso de fonte personalizada aceita colar a URL do chamado (extrai o número e guarda como link direto), e a descrição da Manutenção de dados no Hub explica melhor a diferença entre Atualizações/Histórico e Histórico por chamado.",
+  "version": "1.7.0",
+  "notes": "Fontes personalizadas agora reconhecem também grades modernas baseadas em <div> com papéis de acessibilidade (role=\"grid\"/\"row\"/\"gridcell\" etc.), como as listas do SharePoint — antes só funcionava com <table> HTML de verdade.",
   "url": "https://github.com/batistela/hub-chamados"
 }
