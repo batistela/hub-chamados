@@ -456,13 +456,26 @@ export async function runMovidesk() {
 // pra não confundir isso com "os chamados sumiram". Já um chamado específico não aparecer
 // na grade (mas ela existir normalmente) é tratado como notFound — situação normal
 // (chamado fechado/fora do filtro atual), não erro.
+//
+// IMPORTANTE (adicionado depois de testar com SharePoint de verdade): grades ARIA como as
+// do SharePoint costumam ser preenchidas por JavaScript DEPOIS que a página já "terminou
+// de carregar" (o evento que o background.js usa pra saber quando é hora de ler —
+// navigateAndWait/waitForTabComplete). Ler na hora, sem esperar, corre o risco de pegar a
+// grade ainda vazia (só o cabeçalho, sem nenhuma linha de dado) — o que essa função
+// devolvia como pageError, mesmo com a página certa aberta e o mapeamento certo ("abriu
+// mas não achou nada"). Mesmo raciocínio já usado em runEvolutizeList: em vez de tentar só
+// uma vez, fica checando a cada 500ms se já apareceu uma grade com pelo menos uma linha de
+// dado, por até 12s — assim que aparecer, segue na hora; só desiste (pageError) se passar
+// o teto todo sem nada. Uma <table> comum do GLPI já vem pronta no primeiro carregamento,
+// então esse caso só espera 0 vezes e segue igual a antes.
 const CUSTOM_GRID_SEL = 'table, [role="grid"], [role="table"], [role="treegrid"]';
 const CUSTOM_ROW_SEL = 'tr, [role="row"]';
 const CUSTOM_CELL_SEL = 'td, th, [role="gridcell"], [role="columnheader"], [role="cell"], [role="rowheader"]';
 
-export function extractCustomListRows(columns, numbers) {
+export async function extractCustomListRows(columns, numbers) {
   const cols = columns || {};
   const wanted = Array.from(new Set((numbers || []).map(String)));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function rowsOf(root) {
     return Array.from(root.querySelectorAll(CUSTOM_ROW_SEL)).filter((r) => r.closest(CUSTOM_GRID_SEL) === root);
@@ -495,9 +508,20 @@ export function extractCustomListRows(columns, numbers) {
     return best;
   }
 
-  const grid = findGrid(cols.number && cols.number.tableSelector);
+  // Grades preenchidas via JS (SharePoint e outras SPAs) podem ainda não ter nenhuma
+  // linha de dado no instante em que a página "termina de carregar" — fica tentando por
+  // até 12s antes de desistir, em vez de uma única tentativa. Numa página que já carrega
+  // pronta (GLPI, a maioria dos sites), findGrid acha de primeira e esse laço nem espera.
+  let grid = null;
+  let allRows = [];
+  const deadline = Date.now() + 12000;
+  do {
+    grid = findGrid(cols.number && cols.number.tableSelector);
+    allRows = grid ? rowsOf(grid) : [];
+    if (grid && allRows.length >= 2) break;
+    await sleep(500);
+  } while (Date.now() < deadline);
   if (!grid) return { pageError: 'sem-tabela' };
-  const allRows = rowsOf(grid);
   if (allRows.length < 2) return { pageError: 'sem-tabela' };
 
   const headRow = allRows[0];

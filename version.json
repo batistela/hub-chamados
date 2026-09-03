@@ -1,5 +1,5 @@
 {
-  "version": "1.7.1",
-  "notes": "Correção: colar a URL de um item ao adicionar um avulso de fonte personalizada não reconhecia o parâmetro \"?ID=\" (maiúsculo) usado pelo SharePoint — agora a busca do número na URL não diferencia maiúsculas/minúsculas no nome do parâmetro.",
+  "version": "1.7.2",
+  "notes": "A busca de fontes personalizadas (avulso) agora espera até 12s pela grade aparecer com dados antes de desistir, em vez de ler só uma vez assim que a página carrega — corrige o caso de grades preenchidas via JavaScript depois do carregamento (ex: listas do SharePoint) aparecerem como \"vazias\" na checagem automática mesmo estando certas.",
   "url": "https://github.com/batistela/hub-chamados"
 }
