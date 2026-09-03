@@ -1,5 +1,5 @@
 {
-  "version": "1.8.0",
-  "notes": "Fontes personalizadas: os campos além do \"Número do ticket\" não são mais fixos (\"Status\", \"Requerente\", etc.) — agora você adiciona quantos campos quiser, com o nome e na ordem que preferir, e marca (opcional) se algum deles é \"Status\" ou \"Data/hora da atualização\" pra manter os avisos automáticos de mudança.",
+  "version": "1.8.1",
+  "notes": "\"Testar a busca\" (fontes personalizadas) agora mostra um diagnóstico quando não encontra o chamado — quantas linhas a grade tem, o cabeçalho da coluna \"Número do ticket\" reconhecido, e os primeiros valores lidos nela — pra ajudar a entender por que um chamado que está visível na tela mesmo assim não é encontrado.",
   "url": "https://github.com/batistela/hub-chamados"
 }

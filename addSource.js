@@ -534,7 +534,13 @@ el('btnTestLookup').addEventListener('click', async () => {
     }
     const row = result && result[num];
     if (!row || row.notFound) {
-      el('testResult').textContent = `Não encontrei o chamado ${num} nessa lista — pode estar filtrado/fora da página atual, ou o mapeamento de colunas não bateu. Confira se a coluna "Número do ticket" foi mapeada certa.`;
+      const dbg = result && result.__debug;
+      let extra = '';
+      if (dbg) {
+        const sample = (dbg.numberColumnSample || []).map((v) => `"${v || '—'}"`).join(', ') || '(nenhum valor lido)';
+        extra = ` [diagnóstico: grade ${dbg.gridInfo}, ${dbg.totalBodyRows} linha(s) de dado, cabeçalho da coluna "Número do ticket" = "${dbg.numberColumnHeaderText || '(vazio)'}", primeiros valores vistos nessa coluna: ${sample}]`;
+      }
+      el('testResult').textContent = `Não encontrei o chamado ${num} nessa lista — pode estar filtrado/fora da página atual, ou o mapeamento de colunas não bateu. Confira se a coluna "Número do ticket" foi mapeada certa.${extra}`;
     } else {
       const rowFields = row.fields || {};
       const parts = columns.fields.map((f) => `${f.label}: "${rowFields[f.key] || '—'}"`).join(', ');

@@ -632,5 +632,16 @@ export async function extractCustomListRows(columns, numbers) {
   for (const want of stillWanted) {
     out[want] = { number: want, fields: {}, notFound: true };
   }
+  // Diagnóstico — só pra ajudar a entender um "não encontrei" quando o mapeamento PARECE
+  // certo (ex: o Murilo via um chamado na tela e mesmo assim a busca não achou). Não é lido
+  // por checkCustomAvulsos (background.js), que só olha as chaves por número — é lido só
+  // pelo botão "Testar a busca" (addSource.js), pra mostrar o que a busca realmente viu na
+  // coluna do número, sem precisar abrir o DevTools.
+  out.__debug = {
+    gridInfo: `${grid.tagName.toLowerCase()}${grid.id ? '#' + grid.id : ''}${grid.getAttribute('role') ? `[role="${grid.getAttribute('role')}"]` : ''}`,
+    totalBodyRows: bodyRows.length,
+    numberColumnHeaderText: headerCells[numberIdx] || '',
+    numberColumnSample: bodyRows.slice(0, 25).map((row) => cellText(row, numberIdx)),
+  };
   return out;
 }
