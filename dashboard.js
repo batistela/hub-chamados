@@ -72,9 +72,13 @@ function extractTicketUrlInfo(raw) {
   } catch (e) {
     return null;
   }
-  for (const key of ['id', 'ticket', 'numero', 'number', 'num']) {
-    const v = u.searchParams.get(key);
-    if (v && /\d/.test(v)) return { number: v, url: raw };
+  // IMPORTANTE: URLSearchParams.get() é sensível a maiúsculas/minúsculas no nome do
+  // parâmetro — "?ID=410" (SharePoint, ex: o link de "Copiar link" de um item de lista)
+  // não batia com a busca por 'id' antes dessa correção, porque get('id') não acha 'ID'.
+  // Por isso comparamos em minúsculas manualmente em vez de usar searchParams.get direto.
+  const wanted = ['id', 'ticket', 'numero', 'number', 'num'];
+  for (const [key, v] of u.searchParams.entries()) {
+    if (wanted.includes(key.toLowerCase()) && v && /\d/.test(v)) return { number: v, url: raw };
   }
   const segments = u.pathname.split('/').filter(Boolean);
   for (let i = segments.length - 1; i >= 0; i--) {

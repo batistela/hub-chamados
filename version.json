@@ -1,5 +1,5 @@
 {
-  "version": "1.7.0",
-  "notes": "Fontes personalizadas agora reconhecem também grades modernas baseadas em <div> com papéis de acessibilidade (role=\"grid\"/\"row\"/\"gridcell\" etc.), como as listas do SharePoint — antes só funcionava com <table> HTML de verdade.",
+  "version": "1.7.1",
+  "notes": "Correção: colar a URL de um item ao adicionar um avulso de fonte personalizada não reconhecia o parâmetro \"?ID=\" (maiúsculo) usado pelo SharePoint — agora a busca do número na URL não diferencia maiúsculas/minúsculas no nome do parâmetro.",
   "url": "https://github.com/batistela/hub-chamados"
 }
