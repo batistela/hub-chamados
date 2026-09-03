@@ -427,29 +427,128 @@ export async function runMovidesk() {
 
 // ---------- fontes personalizadas (avulso, cadastradas pelo usuário) ----------
 // Diferente das outras extractXxx acima (seletores fixos, escritos à mão pra um site
-// específico), essa é genérica: os seletores vêm de fora (config.customSources, montados
-// pelo assistente de "adicionar fonte" — ver addSource.js), um por campo. Se um seletor
-// não bater com nada na página (site mudou o layout, ou esse campo nunca existiu nesse
-// site), o campo correspondente simplesmente fica vazio — não derruba a extração dos
-// outros campos, e o Hub mostra esse chamado avulso como "sem X capturado" em vez de dar
-// erro.
-export function extractCustomAvulso(selectors) {
-  function textOf(sel) {
-    if (!sel) return '';
-    try {
-      const elm = document.querySelector(sel);
-      return elm ? (elm.innerText || elm.textContent || '').replace(/\s+/g, ' ').trim() : '';
-    } catch (e) {
-      return ''; // seletor salvo não é mais válido nessa página — trata como "não capturado"
+// específico), essa é genérica: o mapeamento vem de fora (config.customSources, montado
+// pelo assistente addSource.js) — não um seletor por chamado individual, mas COLUNAS
+// dentro da tabela/grade que já lista todos os chamados (a pedido do Murilo: mais fácil
+// de mapear clicando numa lista já visível do que abrindo uma página de detalhe por
+// número). Uma chamada só dessa função resolve TODOS os avulsos daquela fonte de uma vez
+// (uma leitura da tabela inteira), em vez de uma navegação por chamado como as outras
+// fontes fazem — mais rápido e mais simples de mapear.
+//
+// `columns` = { number, status, requester, lastUpdate, lastUpdateBy } — cada um
+// (exceto number, que é obrigatório) opcionalmente um objeto
+// { tableSelector, columnIndex, headerText }. `numbers` = lista de números de chamado
+// que essa checagem está procurando na tabela.
+//
+// Se a tabela mapeada não for mais encontrada (seletor não bate com nada E não existe
+// nenhuma outra <table> com linhas na página), devolve pageError — trata como sessão
+// caída/página não carregada, igual às outras fontes com lista (ver checkGLPIList etc.),
+// pra não confundir isso com "os chamados sumiram". Já um chamado específico não aparecer
+// na tabela (mas a tabela existir normalmente) é tratado como notFound — situação normal
+// (chamado fechado/fora do filtro atual), não erro.
+export function extractCustomListRows(columns, numbers) {
+  const cols = columns || {};
+  const wanted = Array.from(new Set((numbers || []).map(String)));
+
+  function findTable(sel) {
+    if (sel) {
+      try {
+        const t = document.querySelector(sel);
+        if (t && t.tagName === 'TABLE' && t.rows && t.rows.length > 1) return t;
+      } catch (e) {
+        // seletor salvo não é mais válido nessa página — cai pro fallback abaixo
+      }
     }
+    // Fallback: a maior <table> da página (mais linhas) — cobre o caso do seletor
+    // salvo ter parado de bater (ex: o site trocou a classe do contêiner).
+    const tables = Array.from(document.querySelectorAll('table'));
+    let best = null;
+    let bestRows = 1;
+    for (const t of tables) {
+      const n = t.rows ? t.rows.length : 0;
+      if (n > bestRows) {
+        best = t;
+        bestRows = n;
+      }
+    }
+    return best;
   }
-  const sel = selectors || {};
-  const title = (document.title || '').trim();
-  const number = textOf(sel.number);
-  const status = textOf(sel.status);
-  const requester = textOf(sel.requester);
-  const lastUpdate = textOf(sel.lastUpdate);
-  const lastUpdateBy = textOf(sel.lastUpdateBy);
-  const notFound = !status && !requester && !lastUpdate && !lastUpdateBy && !number;
-  return { title, number, status, requester, lastUpdate, lastUpdateBy, notFound };
+
+  const table = findTable(cols.number && cols.number.tableSelector);
+  if (!table) return { pageError: 'sem-tabela' };
+  const allRows = Array.from(table.rows);
+  if (allRows.length < 2) return { pageError: 'sem-tabela' };
+
+  const headRow = (table.tHead && table.tHead.rows[0]) || allRows[0];
+  const headerCells = headRow ? Array.from(headRow.cells).map((c) => (c.innerText || c.textContent || '').trim().toUpperCase()) : [];
+
+  // Prefere casar por TEXTO do cabeçalho salvo (mais resistente a mudança de layout do
+  // que um índice fixo — colunas às vezes são reordenadas ou uma nova é inserida no
+  // meio); só cai pro índice salvo se não achar por texto (cabeçalho mudou de nome, ou
+  // não tem uma linha de cabeçalho clara nessa tabela).
+  function resolveIndex(colInfo) {
+    if (!colInfo) return -1;
+    if (colInfo.headerText) {
+      const idx = headerCells.indexOf(String(colInfo.headerText).trim().toUpperCase());
+      if (idx >= 0) return idx;
+    }
+    return typeof colInfo.columnIndex === 'number' ? colInfo.columnIndex : -1;
+  }
+
+  const idx = {
+    number: resolveIndex(cols.number),
+    status: resolveIndex(cols.status),
+    requester: resolveIndex(cols.requester),
+    lastUpdate: resolveIndex(cols.lastUpdate),
+    lastUpdateBy: resolveIndex(cols.lastUpdateBy),
+  };
+  if (idx.number < 0) return { pageError: 'sem-tabela' };
+
+  const bodyRows =
+    table.tBodies && table.tBodies.length
+      ? Array.from(table.tBodies).flatMap((b) => Array.from(b.rows))
+      : allRows.slice(headRow === allRows[0] ? 1 : 0);
+
+  function cellText(row, i) {
+    if (i == null || i < 0 || !row.cells[i]) return '';
+    return (row.cells[i].innerText || row.cells[i].textContent || '').replace(/\s+/g, ' ').trim();
+  }
+  function rowLink(row) {
+    const numCell = row.cells[idx.number];
+    const a = (numCell && numCell.querySelector('a[href]')) || row.querySelector('a[href]');
+    return a ? new URL(a.getAttribute('href'), document.baseURI).toString() : '';
+  }
+
+  const out = {};
+  const stillWanted = new Set(wanted);
+  for (const row of bodyRows) {
+    if (!stillWanted.size) break;
+    const numTxt = cellText(row, idx.number);
+    if (!numTxt) continue;
+    // Casa por igualdade exata primeiro (mais seguro); senão por "contém" — números de
+    // chamado às vezes vêm com prefixo/sufixo na grade (ex: "#12345", "12345 (e-mail)").
+    let matched = null;
+    for (const want of stillWanted) {
+      if (numTxt === want || numTxt.includes(want)) {
+        matched = want;
+        break;
+      }
+    }
+    if (!matched) continue;
+    out[matched] = {
+      title: '',
+      number: numTxt,
+      status: cellText(row, idx.status),
+      requester: cellText(row, idx.requester),
+      lastUpdate: cellText(row, idx.lastUpdate),
+      lastUpdateBy: cellText(row, idx.lastUpdateBy),
+      url: rowLink(row),
+      notFound: false,
+    };
+    stillWanted.delete(matched);
+  }
+  for (const want of stillWanted) {
+    out[want] = { title: '', number: want, status: '', notFound: true };
+  }
+  return out;
 }

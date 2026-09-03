@@ -8,7 +8,7 @@ import {
   extractEvolutizeTramitacao,
   runMovidesk,
   extractMovideskAvulso,
-  extractCustomAvulso,
+  extractCustomListRows,
 } from './extractors.js';
 
 const GLPI_BASE = 'http://chamadosti.holambra.corp';
@@ -81,11 +81,15 @@ const DEFAULT_CONFIG = {
   customLinks: [],
   // Fontes de chamados cadastradas pelo próprio usuário (sites de fornecedores/parceiros
   // que o Hub não conhece de fábrica) — cadastradas via addSource.html. Só modo avulso
-  // (um chamado por vez, por número); cada item tem
-  // { id, label, urlTemplate, selectors: {number,status,requester,lastUpdate,lastUpdateBy},
-  //   avulsos: [], avulsoStaleDays: {}, enabled }. `id` é um identificador interno que
-  // nunca muda (mesmo se o usuário renomear o `label` depois) — é ele que assina os dados
-  // salvos em state.customAvulsos, então renomear a fonte não perde histórico.
+  // (acompanha números específicos, não a lista inteira), mas a BUSCA em si acontece na
+  // tela onde o fornecedor lista todos os chamados (não numa página de detalhe por
+  // número) — cada item tem
+  // { id, label, listUrl, columns: {number,status,requester,lastUpdate,lastUpdateBy},
+  //   avulsos: [], avulsoStaleDays: {}, enabled }, onde cada entrada em `columns` (menos
+  // `number`, que é obrigatório) é { tableSelector, columnIndex, headerText }. `id` é um
+  // identificador interno que nunca muda (mesmo se o usuário renomear o `label` depois) —
+  // é ele que assina os dados salvos em state.customAvulsos, então renomear a fonte não
+  // perde histórico.
   customSources: [],
   // Não tem mais um campo "updateCheckUrl" aqui — o link do version.json (aviso de
   // versão nova) agora é fixo no código, ver UPDATE_CHECK_URL mais abaixo.
@@ -506,27 +510,32 @@ async function checkMovideskAvulsos(tabId, numbers) {
   return out;
 }
 
+// Diferente das outras checkXxxAvulsos (uma navegação POR chamado, pra uma página de
+// detalhe individual), aqui é uma navegação SÓ pra fonte inteira — abre a URL da lista
+// (config.customSources[i].listUrl) uma vez e procura, na mesma leitura, todos os
+// avulsos configurados pra essa fonte de uma vez (ver extractCustomListRows). Mais rápido
+// (não abre N páginas pra N chamados) e é exatamente o fluxo que o Murilo pediu: buscar
+// na tela onde todos os chamados aparecem, não numa página específica por número.
 async function checkCustomAvulsos(tabId, source) {
+  const avulsos = source.avulsos || [];
+  if (!avulsos.length) return {};
+  if (!source.listUrl) {
+    throw new Error('Nenhuma URL de lista configurada pra essa fonte.');
+  }
+  await navigateAndWait(tabId, source.listUrl);
+  const result = await exec(tabId, extractCustomListRows, [source.columns || {}, avulsos]);
+  if (!result || result.pageError) {
+    throw new Error(
+      'Não encontrei nenhuma tabela de chamados nessa página — sessão expirada, página não ' +
+      'carregou, ou o mapeamento de colunas não bate mais com o layout do site (nesse caso, ' +
+      'use "Remapear campos" na fonte, no Hub).'
+    );
+  }
   const out = {};
-  const template = source.urlTemplate || '';
-  for (const num of source.avulsos || []) {
-    if (!template.includes('{numero}')) {
-      // urlTemplate vazio, ou sem o placeholder {numero} — não dá pra montar a URL do
-      // chamado. Isso não deveria acontecer (o assistente exige {numero}), mas melhor
-      // registrar um erro claro do que tentar navegar pra algo errado.
-      out[num] = { error: 'URL da fonte não tem {numero} configurado corretamente', number: num };
-      continue;
-    }
-    const url = template.replace('{numero}', encodeURIComponent(num));
-    try {
-      await navigateAndWait(tabId, url);
-      const data = await exec(tabId, extractCustomAvulso, [source.selectors || {}]);
-      const result = data || { title: '', status: '', lastUpdate: '', notFound: true };
-      result.url = url;
-      out[num] = result;
-    } catch (e) {
-      out[num] = { error: String(e && e.message ? e.message : e), number: num };
-    }
+  for (const num of avulsos) {
+    const data = result[num] || { title: '', status: '', notFound: true, number: num };
+    if (!data.url) data.url = source.listUrl;
+    out[num] = data;
   }
   return out;
 }

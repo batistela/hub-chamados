@@ -1,5 +1,5 @@
 {
-  "version": "1.4.0",
-  "notes": "Suporte a fontes personalizadas (outros sites de fornecedores, modo avulso) com assistente de mapeamento de campos por clique — além do card de manutenção de dados e do checkbox pra desligar uma fonte inteira, das versões anteriores.",
+  "version": "1.5.0",
+  "notes": "Fontes personalizadas agora buscam a linha certa direto na tela onde o fornecedor lista todos os chamados (mapeamento por coluna, com botão de teste), em vez de exigir uma URL de detalhe por número.",
   "url": "https://github.com/batistela/hub-chamados"
 }

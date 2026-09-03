@@ -336,7 +336,7 @@ function renderCustomSources(config) {
   }
   container.innerHTML = '';
   sources.forEach((source) => {
-    const fieldCount = Object.keys(source.selectors || {}).length;
+    const columnCount = Object.keys(source.columns || {}).length;
     const block = document.createElement('div');
     block.className = 'custom-source-block';
     block.innerHTML = `
@@ -345,7 +345,7 @@ function renderCustomSources(config) {
         <input type="checkbox" class="cs-enabled" ${source.enabled !== false ? 'checked' : ''} />
         Verificar esta fonte
       </label>
-      <p class="muted small">URL: <code>${escapeHtml(source.urlTemplate || '')}</code> — ${fieldCount} campo(s) mapeado(s)</p>
+      <p class="muted small">Lista: <code>${escapeHtml(source.listUrl || '')}</code> — ${columnCount} coluna(s) mapeada(s)</p>
       <div class="avulso-add">
         <input type="text" class="cs-avulso-input" placeholder="Número do chamado" />
         <button class="btn cs-add-avulso">Adicionar</button>
@@ -875,23 +875,34 @@ function sanitizeImportedConfig(incoming) {
           .filter((x) => x && typeof x === 'object' && typeof x.url === 'string' && x.url)
           .map((x) => ({ label: typeof x.label === 'string' && x.label ? x.label : x.url, url: x.url }))
       : undefined;
-  const SELECTOR_KEYS = ['number', 'status', 'requester', 'lastUpdate', 'lastUpdateBy'];
+  const COLUMN_KEYS = ['number', 'status', 'requester', 'lastUpdate', 'lastUpdateBy'];
+  const asColumnInfo = (v) =>
+    v && typeof v === 'object' && !Array.isArray(v) && typeof v.tableSelector === 'string' && Number.isFinite(Number(v.columnIndex))
+      ? { tableSelector: v.tableSelector, columnIndex: Number(v.columnIndex), headerText: typeof v.headerText === 'string' ? v.headerText : '' }
+      : undefined;
   const asCustomSources = (v) =>
     Array.isArray(v)
       ? v
-          .filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && x.id && typeof x.label === 'string' && x.label && typeof x.urlTemplate === 'string')
-          .map((x) => ({
-            id: x.id,
-            label: x.label,
-            urlTemplate: x.urlTemplate,
-            selectors:
-              x.selectors && typeof x.selectors === 'object' && !Array.isArray(x.selectors)
-                ? Object.fromEntries(Object.entries(x.selectors).filter(([k, sv]) => SELECTOR_KEYS.includes(k) && typeof sv === 'string' && sv))
-                : {},
-            avulsos: asArrayOfStrings(x.avulsos) || [],
-            avulsoStaleDays: asPlainObject(x.avulsoStaleDays) || {},
-            enabled: typeof x.enabled === 'boolean' ? x.enabled : true,
-          }))
+          .filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && x.id && typeof x.label === 'string' && x.label && typeof x.listUrl === 'string')
+          .map((x) => {
+            const columns = {};
+            if (x.columns && typeof x.columns === 'object' && !Array.isArray(x.columns)) {
+              for (const key of COLUMN_KEYS) {
+                const col = asColumnInfo(x.columns[key]);
+                if (col) columns[key] = col;
+              }
+            }
+            return {
+              id: x.id,
+              label: x.label,
+              listUrl: x.listUrl,
+              columns,
+              avulsos: asArrayOfStrings(x.avulsos) || [],
+              avulsoStaleDays: asPlainObject(x.avulsoStaleDays) || {},
+              enabled: typeof x.enabled === 'boolean' ? x.enabled : true,
+            };
+          })
+          .filter((x) => x.columns.number) // sem coluna de número não dá pra achar a linha certa depois
       : undefined;
 
   const out = {

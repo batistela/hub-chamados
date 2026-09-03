@@ -1,14 +1,18 @@
 // Hub de Chamados — autoria original: Murilo (murilobats@gmail.com), início em ago/2026.
-// Assistente de "adicionar fonte personalizada" — pede pra clicar em cada campo (número,
-// status, requerente, data/hora da atualização, usuário da tramitação) na página real do
-// site do fornecedor, monta um seletor CSS pra cada um, e salva isso em
-// config.customSources. A checagem de verdade (background.js) usa exatamente esses
-// seletores depois, via extractCustomAvulso (extractors.js).
+// Assistente de "adicionar fonte personalizada" — abre a tela onde o fornecedor lista
+// TODOS os chamados (não uma página de detalhe por número, a pedido do Murilo: mais fácil
+// de mapear os campos clicando numa lista já visível), pede pra clicar em cada uma das 5
+// colunas (número, status, requerente, data/hora da atualização, usuário da tramitação),
+// e salva isso em config.customSources. A checagem de verdade (background.js) usa
+// exatamente esse mapeamento depois, via extractCustomListRows (extractors.js) — mesma
+// função usada aqui no botão "Testar", pra garantir que o comportamento é idêntico.
+
+import { extractCustomListRows } from './extractors.js';
 
 const el = (id) => document.getElementById(id);
 
 const FIELDS = [
-  { key: 'number', label: 'Número do ticket' },
+  { key: 'number', label: 'Número do ticket', required: true },
   { key: 'status', label: 'Status' },
   { key: 'requester', label: 'Requerente' },
   { key: 'lastUpdate', label: 'Data e hora da atualização' },
@@ -16,7 +20,8 @@ const FIELDS = [
 ];
 
 let sampleTabId = null;
-let picked = {}; // key -> { selector, preview } | 'skipped' | undefined
+// key -> { tableSelector, columnIndex, headerText, preview, fromPrevious? } | 'skipped' | undefined
+let picked = {};
 let editingSource = null;
 
 function escapeHtml(s) {
@@ -37,8 +42,7 @@ applyStoredTheme();
 // cair num sufixo genérico tipo "com"/"com.br", usa o primeiro pedaço em vez disso.
 function suggestLabelFromUrl(urlStr) {
   try {
-    const probe = urlStr.includes('{numero}') ? urlStr.replace('{numero}', '1') : urlStr;
-    const u = new URL(probe);
+    const u = new URL(urlStr);
     const host = u.hostname.replace(/^www\./, '');
     const parts = host.split('.');
     if (!parts.length) return '';
@@ -51,13 +55,13 @@ function suggestLabelFromUrl(urlStr) {
   }
 }
 
-el('sourceUrlTemplate').addEventListener('blur', () => {
+el('sourceListUrl').addEventListener('blur', () => {
   if (el('sourceLabel').value.trim()) return;
-  const suggestion = suggestLabelFromUrl(el('sourceUrlTemplate').value.trim());
+  const suggestion = suggestLabelFromUrl(el('sourceListUrl').value.trim());
   if (suggestion) el('sourceLabel').value = suggestion;
 });
 
-// ---------- modo edição (remapear campos de uma fonte já existente) ----------
+// ---------- modo edição (remapear colunas de uma fonte já existente) ----------
 
 async function initEditMode() {
   const params = new URLSearchParams(location.search);
@@ -67,37 +71,36 @@ async function initEditMode() {
   const found = ((config && config.customSources) || []).find((s) => s.id === editId);
   if (!found) return;
   editingSource = found;
-  el('wizardTitle').textContent = `Remapear campos — ${found.label}`;
+  el('wizardTitle').textContent = `Remapear colunas — ${found.label}`;
   el('sourceLabel').value = found.label;
-  el('sourceUrlTemplate').value = found.urlTemplate || '';
+  el('sourceListUrl').value = found.listUrl || '';
   picked = {};
-  Object.entries(found.selectors || {}).forEach(([key, selector]) => {
-    picked[key] = { selector, preview: selector, fromPrevious: true };
+  Object.entries(found.columns || {}).forEach(([key, col]) => {
+    picked[key] = { ...col, fromPrevious: true };
   });
+  // Mostra o mapeamento já salvo mesmo antes de reabrir a aba — dá pra só corrigir o
+  // nome e salvar de novo sem precisar remapear nada, se for só isso que mudou.
+  el('stepPicker').classList.remove('hidden');
+  el('stepTest').classList.remove('hidden');
+  el('stepSave').classList.remove('hidden');
+  renderPickerFields();
 }
 
-// ---------- passo 1: abrir a página de exemplo ----------
+// ---------- passo 1: abrir a tela com a lista ----------
 
 async function openSample() {
-  const template = el('sourceUrlTemplate').value.trim();
-  const sample = el('sampleNumber').value.trim();
+  const listUrl = el('sourceListUrl').value.trim();
   el('basicsHint').classList.remove('source-error-text');
 
-  if (!template.includes('{numero}')) {
-    el('basicsHint').textContent = 'A URL precisa conter {numero} no lugar do número do chamado (ex: https://site.com/tickets/{numero}).';
-    el('basicsHint').classList.add('source-error-text');
-    return;
-  }
-  if (!sample) {
-    el('basicsHint').textContent = 'Informe um número de chamado real pra abrir a página de exemplo.';
+  if (!listUrl) {
+    el('basicsHint').textContent = 'Informe a URL da tela com a lista de chamados.';
     el('basicsHint').classList.add('source-error-text');
     return;
   }
 
-  const url = template.replace('{numero}', encodeURIComponent(sample));
   let origin;
   try {
-    origin = `${new URL(url).origin}/*`;
+    origin = `${new URL(listUrl).origin}/*`;
   } catch (e) {
     el('basicsHint').textContent = 'Essa URL não parece válida — confira se começa com http:// ou https://.';
     el('basicsHint').classList.add('source-error-text');
@@ -106,14 +109,14 @@ async function openSample() {
 
   // Pede permissão pro domínio do fornecedor em tempo real — não precisa estar em
   // manifest.json de antemão (host_permissions fixo só cobre GLPI/Evolutize/Movidesk).
-  // Isso só funciona porque estamos respondendo direto a um clique do usuário (o botão
-  // "Abrir página de exemplo"); chrome.permissions.request() exige esse gesto.
+  // Só funciona porque estamos respondendo direto a um clique do usuário (o botão
+  // "Abrir essa tela"); chrome.permissions.request() exige esse gesto.
   try {
     const already = await chrome.permissions.contains({ origins: [origin] });
     if (!already) {
       const granted = await chrome.permissions.request({ origins: [origin] });
       if (!granted) {
-        el('basicsHint').textContent = 'Sem permissão pra esse site, o Hub não consegue ler os campos da página. Clique de novo em "Abrir página de exemplo" se mudar de ideia.';
+        el('basicsHint').textContent = 'Sem permissão pra esse site, o Hub não consegue ler a tabela. Clique de novo em "Abrir essa tela" se mudar de ideia.';
         el('basicsHint').classList.add('source-error-text');
         return;
       }
@@ -127,24 +130,31 @@ async function openSample() {
   el('basicsHint').textContent = '';
   if (sampleTabId) {
     try {
-      await chrome.tabs.update(sampleTabId, { url, active: true });
+      await chrome.tabs.update(sampleTabId, { url: listUrl, active: true });
     } catch (e) {
       sampleTabId = null;
     }
   }
   if (!sampleTabId) {
-    const tab = await chrome.tabs.create({ url });
+    const tab = await chrome.tabs.create({ url: listUrl });
     sampleTabId = tab.id;
   }
 
   el('stepPicker').classList.remove('hidden');
+  el('stepTest').classList.remove('hidden');
+  el('stepSave').classList.remove('hidden');
   renderPickerFields();
 }
 
 el('btnOpenSample').addEventListener('click', openSample);
 el('btnOpenSampleAgain').addEventListener('click', openSample);
 
-// ---------- passo 2: selecionar campos ----------
+// ---------- passo 2: selecionar colunas ----------
+
+function columnSummary(state) {
+  if (state.headerText) return `coluna "${escapeHtml(state.headerText)}"`;
+  return `coluna nº ${Number(state.columnIndex) + 1} (sem cabeçalho detectado)`;
+}
 
 function renderPickerFields() {
   const ul = el('pickerFields');
@@ -155,19 +165,21 @@ function renderPickerFields() {
     li.className = 'picker-field';
     let statusHtml;
     if (state === 'skipped') {
-      statusHtml = '<span class="muted">pulado — esse campo não existe nesse site</span>';
+      statusHtml = '<span class="muted">pulado — essa coluna não existe nesse site</span>';
     } else if (state && state.fromPrevious) {
-      statusHtml = `<span class="muted">mapeamento salvo: <code>${escapeHtml(state.selector)}</code> — clique em "Selecionar" pra atualizar</span>`;
+      statusHtml = `<span class="muted">mapeamento salvo: ${columnSummary(state)} — clique em "Selecionar" pra atualizar</span>`;
     } else if (state) {
-      statusHtml = `<span class="picked-preview">"${escapeHtml((state.preview || '').slice(0, 80))}"</span>`;
+      statusHtml = `<span class="picked-preview">${columnSummary(state)} — ex: "${escapeHtml((state.preview || '').slice(0, 60))}"</span>`;
     } else {
       statusHtml = '<span class="muted">não selecionado ainda</span>';
     }
+    const requiredTag = f.required ? '<span class="required-tag">obrigatório</span>' : '';
+    const skipBtn = f.required ? '' : `<button class="btn" data-action="skip" data-field="${f.key}">Pular</button>`;
     li.innerHTML = `
-      <div class="picker-field-label"><strong>${escapeHtml(f.label)}</strong>${statusHtml}</div>
+      <div class="picker-field-label"><strong>${escapeHtml(f.label)}${requiredTag}</strong>${statusHtml}</div>
       <div class="picker-field-actions">
         <button class="btn" data-action="pick" data-field="${f.key}">Selecionar</button>
-        <button class="btn" data-action="skip" data-field="${f.key}">Pular</button>
+        ${skipBtn}
       </div>`;
     ul.appendChild(li);
   });
@@ -175,8 +187,8 @@ function renderPickerFields() {
 }
 
 function updateSaveButtonState() {
-  const anyMapped = FIELDS.some((f) => picked[f.key] && picked[f.key] !== 'skipped');
-  el('btnSaveSource').disabled = !anyMapped;
+  const numberMapped = picked.number && picked.number !== 'skipped';
+  el('btnSaveSource').disabled = !numberMapped;
 }
 
 el('pickerFields').addEventListener('click', (ev) => {
@@ -193,16 +205,17 @@ el('pickerFields').addEventListener('click', (ev) => {
 
 async function startPickingField(fieldKey) {
   if (!sampleTabId) {
-    el('pickerStatus').textContent = 'Nenhuma página de exemplo aberta — clique em "Reabrir página de exemplo" primeiro.';
+    el('pickerStatus').textContent = 'Nenhuma tela aberta — clique em "Reabrir a tela" primeiro.';
     return;
   }
   const fieldLabel = FIELDS.find((f) => f.key === fieldKey).label;
-  el('pickerStatus').textContent = `Clique no elemento certo pra "${fieldLabel}" na aba que foi trazida pra frente (Esc cancela).`;
+  el('pickerStatus').textContent = `Clique em qualquer célula da coluna "${fieldLabel}" na aba que foi trazida pra frente (Esc cancela).`;
   try {
     await chrome.tabs.update(sampleTabId, { active: true });
-    await chrome.windows.update((await chrome.tabs.get(sampleTabId)).windowId, { focused: true });
+    const tab = await chrome.tabs.get(sampleTabId);
+    await chrome.windows.update(tab.windowId, { focused: true });
   } catch (e) {
-    el('pickerStatus').textContent = 'A aba de exemplo não está mais disponível — clique em "Reabrir página de exemplo".';
+    el('pickerStatus').textContent = 'A aba não está mais disponível — clique em "Reabrir a tela".';
     sampleTabId = null;
     return;
   }
@@ -215,12 +228,11 @@ async function startPickingField(fieldKey) {
 
 // Injetada na aba de exemplo via chrome.scripting.executeScript — roda isolada, sem
 // acesso ao escopo daqui (por isso é totalmente self-contained, igual às funções de
-// extractors.js). Fica esperando o próximo clique na página inteira (captura, então
-// intercepta ANTES de qualquer link/botão do próprio site reagir — importante pra não
-// navegar embora sem querer) e manda o seletor + um preview do texto de volta pro
-// assistente via chrome.runtime.sendMessage (disponível mesmo em scripts injetados assim,
-// desde que a extensão tenha permissão pro domínio — foi isso que pedimos antes de abrir
-// essa aba).
+// extractors.js). Fica esperando o próximo clique numa célula de tabela (captura, então
+// intercepta ANTES de qualquer link/botão do próprio site reagir) e manda a coluna
+// (índice + texto do cabeçalho, se achar) de volta pro assistente via
+// chrome.runtime.sendMessage — disponível mesmo em scripts injetados assim, desde que a
+// extensão tenha permissão pro domínio (foi isso que pedimos antes de abrir essa aba).
 function injectPicker(fieldKey) {
   if (window.__hubPickerCleanup) window.__hubPickerCleanup();
 
@@ -230,7 +242,6 @@ function injectPicker(fieldKey) {
   function cssEscape(s) {
     return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/([^a-zA-Z0-9_-])/g, '\\$1');
   }
-
   function buildSelector(target) {
     if (target.id) return `#${cssEscape(target.id)}`;
     for (const attr of ['data-testid', 'data-test', 'data-qa', 'name']) {
@@ -263,24 +274,51 @@ function injectPicker(fieldKey) {
   }
 
   function onOver(e) {
+    const cell = e.target.closest('td, th');
     if (lastEl) lastEl.style.outline = '';
-    lastEl = e.target;
-    lastEl.style.outline = HILITE;
+    lastEl = cell || null;
+    if (lastEl) lastEl.style.outline = HILITE;
   }
+
   function onClick(e) {
     e.preventDefault();
     e.stopPropagation();
-    const target = e.target;
-    const selector = buildSelector(target);
-    const preview = (target.innerText || target.textContent || '').replace(/\s+/g, ' ').trim();
+    const cell = e.target.closest('td, th');
+    if (!cell) {
+      chrome.runtime.sendMessage({
+        type: 'hubFieldPickError',
+        field: fieldKey,
+        message: 'Clique dentro de uma célula da tabela (uma coluna de um chamado na lista) — pode tentar de novo.',
+      });
+      return; // não limpa — deixa tentar de novo sem precisar clicar "Selecionar" outra vez
+    }
+    const table = cell.closest('table');
+    if (!table) {
+      cleanup();
+      chrome.runtime.sendMessage({
+        type: 'hubFieldPickError',
+        field: fieldKey,
+        message: 'Essa célula não está dentro de uma <table> — esse modo só funciona com listas em formato de tabela.',
+      });
+      return;
+    }
+    const row = cell.parentElement;
+    const columnIndex = Array.from(row.children).indexOf(cell);
+    const headRow = (table.tHead && table.tHead.rows[0]) || table.rows[0];
+    const headerCell = headRow ? headRow.cells[columnIndex] : null;
+    const headerText = headerCell ? (headerCell.innerText || headerCell.textContent || '').trim() : '';
+    const preview = (cell.innerText || cell.textContent || '').replace(/\s+/g, ' ').trim();
+    const tableSelector = buildSelector(table);
     cleanup();
-    chrome.runtime.sendMessage({ type: 'hubFieldPicked', field: fieldKey, selector, preview });
+    chrome.runtime.sendMessage({ type: 'hubFieldPicked', field: fieldKey, tableSelector, columnIndex, headerText, preview });
   }
+
   function onKeydown(e) {
     if (e.key !== 'Escape') return;
     cleanup();
     chrome.runtime.sendMessage({ type: 'hubFieldPickCancelled', field: fieldKey });
   }
+
   function cleanup() {
     if (lastEl) lastEl.style.outline = '';
     document.removeEventListener('mouseover', onOver, true);
@@ -297,10 +335,13 @@ function injectPicker(fieldKey) {
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === 'hubFieldPicked') {
-    picked[msg.field] = { selector: msg.selector, preview: msg.preview };
+    picked[msg.field] = { tableSelector: msg.tableSelector, columnIndex: msg.columnIndex, headerText: msg.headerText, preview: msg.preview };
     renderPickerFields();
     const fieldLabel = FIELDS.find((f) => f.key === msg.field)?.label || msg.field;
-    el('pickerStatus').textContent = `Campo "${fieldLabel}" capturado — seletor: ${msg.selector}`;
+    el('pickerStatus').textContent = `Coluna de "${fieldLabel}" capturada${msg.headerText ? ` (cabeçalho: "${msg.headerText}")` : ''}.`;
+  }
+  if (msg?.type === 'hubFieldPickError') {
+    el('pickerStatus').textContent = msg.message;
   }
   if (msg?.type === 'hubFieldPickCancelled') {
     el('pickerStatus').textContent = 'Seleção cancelada.';
@@ -310,7 +351,60 @@ chrome.runtime.onMessage.addListener((msg) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === sampleTabId) {
     sampleTabId = null;
-    el('pickerStatus').textContent = 'A aba de exemplo foi fechada — clique em "Reabrir página de exemplo" pra continuar selecionando campos.';
+    el('pickerStatus').textContent = 'A aba foi fechada — clique em "Reabrir a tela" pra continuar selecionando colunas.';
+  }
+});
+
+// ---------- passo 3: testar ----------
+
+function buildColumnsFromPicked() {
+  const columns = {};
+  FIELDS.forEach((f) => {
+    const p = picked[f.key];
+    if (p && p !== 'skipped') columns[f.key] = { tableSelector: p.tableSelector, columnIndex: p.columnIndex, headerText: p.headerText };
+  });
+  return columns;
+}
+
+el('btnTestLookup').addEventListener('click', async () => {
+  if (!sampleTabId) {
+    el('testResult').textContent = 'Abra a tela primeiro.';
+    return;
+  }
+  const num = el('testNumber').value.trim();
+  if (!num) {
+    el('testResult').textContent = 'Informe um número de chamado pra testar.';
+    return;
+  }
+  const columns = buildColumnsFromPicked();
+  if (!columns.number) {
+    el('testResult').textContent = 'Mapeie a coluna "Número do ticket" primeiro.';
+    return;
+  }
+  el('testResult').textContent = 'Testando...';
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: sampleTabId },
+      func: extractCustomListRows,
+      args: [columns, [num]],
+    });
+    if (result && result.pageError) {
+      el('testResult').textContent = 'Não encontrei nenhuma tabela nessa página — confira se a aba ainda está na tela certa.';
+      return;
+    }
+    const row = result && result[num];
+    if (!row || row.notFound) {
+      el('testResult').textContent = `Não encontrei o chamado ${num} nessa lista — pode estar filtrado/fora da página atual, ou o mapeamento de colunas não bateu. Confira se a coluna "Número do ticket" foi mapeada certa.`;
+    } else {
+      el('testResult').textContent =
+        `Encontrado — status: "${row.status || '—'}"` +
+        (columns.requester ? `, requerente: "${row.requester || '—'}"` : '') +
+        (columns.lastUpdate ? `, última atualização: "${row.lastUpdate || '—'}"` : '') +
+        (columns.lastUpdateBy && row.lastUpdateBy ? ` (${row.lastUpdateBy})` : '') +
+        '.';
+    }
+  } catch (e) {
+    el('testResult').textContent = `Erro ao testar: ${(e && e.message) || e}`;
   }
 });
 
@@ -322,22 +416,18 @@ function genId() {
 
 el('btnSaveSource').addEventListener('click', async () => {
   const label = el('sourceLabel').value.trim();
-  const urlTemplate = el('sourceUrlTemplate').value.trim();
+  const listUrl = el('sourceListUrl').value.trim();
   if (!label) {
     el('pickerStatus').textContent = 'Dê um nome pra essa fonte antes de salvar.';
     return;
   }
-  if (!urlTemplate.includes('{numero}')) {
-    el('pickerStatus').textContent = 'A URL precisa conter {numero} no lugar do número do chamado.';
+  if (!listUrl) {
+    el('pickerStatus').textContent = 'Informe a URL da lista antes de salvar.';
     return;
   }
-  const selectors = {};
-  FIELDS.forEach((f) => {
-    const p = picked[f.key];
-    if (p && p !== 'skipped') selectors[f.key] = p.selector;
-  });
-  if (!Object.keys(selectors).length) {
-    el('pickerStatus').textContent = 'Selecione pelo menos um campo antes de salvar.';
+  const columns = buildColumnsFromPicked();
+  if (!columns.number) {
+    el('pickerStatus').textContent = 'Mapeie a coluna "Número do ticket" antes de salvar — é como o Hub encontra a linha certa.';
     return;
   }
 
@@ -347,9 +437,9 @@ el('btnSaveSource').addEventListener('click', async () => {
 
   if (editingSource) {
     const idx = list.findIndex((s) => s.id === editingSource.id);
-    if (idx !== -1) list[idx] = { ...list[idx], label, urlTemplate, selectors };
+    if (idx !== -1) list[idx] = { ...list[idx], label, listUrl, columns };
   } else {
-    list.push({ id: genId(), label, urlTemplate, selectors, avulsos: [], avulsoStaleDays: {}, enabled: true });
+    list.push({ id: genId(), label, listUrl, columns, avulsos: [], avulsoStaleDays: {}, enabled: true });
   }
   cfg.customSources = list;
   await chrome.storage.local.set({ config: cfg });

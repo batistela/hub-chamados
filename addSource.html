@@ -24,30 +24,40 @@
           <input type="text" id="sourceLabel" placeholder="Ex: Zendesk" />
         </label>
         <label class="full-width">
-          URL do chamado — use <code>{numero}</code> no lugar do número
-          <input type="text" id="sourceUrlTemplate" placeholder="https://suporte.fornecedor.com/tickets/{numero}" />
-        </label>
-        <label>
-          Número de um chamado real (só pra abrir a página de exemplo agora)
-          <input type="text" id="sampleNumber" placeholder="Ex: 12345" />
+          URL da tela com a lista de chamados (pode já vir filtrada, tipo uma pesquisa salva)
+          <input type="text" id="sourceListUrl" placeholder="https://suporte.fornecedor.com/tickets" />
         </label>
       </div>
       <p id="basicsHint" class="muted small"></p>
-      <button id="btnOpenSample" class="btn primary">Abrir página de exemplo</button>
+      <button id="btnOpenSample" class="btn primary">Abrir essa tela</button>
     </section>
 
     <section class="card hidden" id="stepPicker">
-      <h2>2. Selecionar os campos</h2>
-      <p class="muted small">Clique em "Selecionar", depois clique no elemento certo na aba que abrimos (ela foi trazida pra frente). Se esse campo não existir nesse site, clique em "Pular" — dá pra voltar e mapear depois.</p>
+      <h2>2. Selecionar as colunas</h2>
+      <p class="muted small">Clique em "Selecionar" e depois clique em qualquer célula da coluna certa na aba que abrimos (de preferência no cabeçalho da coluna) — ela foi trazida pra frente. Só funciona em listas no formato de tabela (a maioria dos sistemas, incluindo o GLPI). Se a coluna não existir nesse site, clique em "Pular".</p>
       <ul class="picker-fields" id="pickerFields"></ul>
       <div class="wizard-actions">
-        <button id="btnOpenSampleAgain" class="btn">Reabrir página de exemplo</button>
-        <button id="btnSaveSource" class="btn primary" disabled>Salvar fonte</button>
+        <button id="btnOpenSampleAgain" class="btn">Reabrir a tela</button>
       </div>
       <p id="pickerStatus" class="muted small"></p>
     </section>
+
+    <section class="card hidden" id="stepTest">
+      <h2>3. Testar a busca (opcional, mas recomendado)</h2>
+      <p class="muted small">Antes de salvar, confirme que o Hub acha a linha certa pra um chamado que você sabe que está na lista agora.</p>
+      <div class="wizard-actions">
+        <input type="text" id="testNumber" placeholder="Número de um chamado real" />
+        <button id="btnTestLookup" class="btn">Testar</button>
+      </div>
+      <p id="testResult" class="muted small"></p>
+    </section>
+
+    <section class="card hidden" id="stepSave">
+      <button id="btnSaveSource" class="btn primary" disabled>Salvar fonte</button>
+      <p class="muted small">Precisa mapear pelo menos a coluna "Número do ticket" pra poder salvar.</p>
+    </section>
   </main>
 
-  <script src="addSource.js"></script>
+  <script type="module" src="addSource.js"></script>
 </body>
 </html>
