@@ -501,11 +501,28 @@ export function normalizeCustomListColumns(columns) {
 // dado, por até 12s — assim que aparecer, segue na hora; só desiste (pageError) se passar
 // o teto todo sem nada. Uma <table> comum do GLPI já vem pronta no primeiro carregamento,
 // então esse caso só espera 0 vezes e segue igual a antes.
-const CUSTOM_GRID_SEL = 'table, [role="grid"], [role="table"], [role="treegrid"]';
-const CUSTOM_ROW_SEL = 'tr, [role="row"]';
-const CUSTOM_CELL_SEL = 'td, th, [role="gridcell"], [role="columnheader"], [role="cell"], [role="rowheader"]';
-
 export async function extractCustomListRows(columns, numbers) {
+  // IMPORTANTE (bug real encontrado em 04/09/2026, não uma particularidade do
+  // SharePoint): essa função é injetada sozinha via chrome.scripting.executeScript, que
+  // serializa só o CORPO dela (Function.prototype.toString()) e reconstrói/roda isso numa
+  // outra página, num contexto novo — QUALQUER referência a algo declarado FORA do corpo
+  // da função (ex: um `const` no nível do módulo) simplesmente não existe mais nesse
+  // contexto e vira ReferenceError. Essas três constantes ficavam declaradas fora da
+  // função (nível de módulo) até essa correção — o que fazia TODA extração de fontes
+  // personalizadas (não só SharePoint: qualquer <table> também, já que o erro acontece
+  // antes de sequer olhar a página) falhar silenciosamente: a Promise rejeitava dentro do
+  // mundo isolado da aba injetada, e o chrome.scripting.executeScript devolvia
+  // `result: null` pro chamador (addSource.js / background.js) SEM lançar nenhum erro
+  // visível ali — só apareceria um ReferenceError no console da ABA DO SITE sendo lida,
+  // não no console da tela do Hub, o que tornou o bug bem mais difícil de perceber. Os
+  // testes com jsdom nunca pegaram isso porque lá a função é chamada via import normal
+  // (com escopo/closure de verdade), não via serialização — só reproduz o problema real
+  // do navegador. Por isso agora ficam declaradas AQUI DENTRO, como injectPicker
+  // (addSource.js) já fazia certo com sua própria cópia local.
+  const CUSTOM_GRID_SEL = 'table, [role="grid"], [role="table"], [role="treegrid"]';
+  const CUSTOM_ROW_SEL = 'tr, [role="row"]';
+  const CUSTOM_CELL_SEL = 'td, th, [role="gridcell"], [role="columnheader"], [role="cell"], [role="rowheader"]';
+
   const rawCols = columns || {};
   // Normalização inline do formato antigo (sem `fields`) — duplicada de
   // normalizeCustomListColumns de propósito, ver comentário acima: essa função precisa

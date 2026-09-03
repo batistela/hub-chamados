@@ -1,5 +1,5 @@
 {
-  "version": "1.8.3",
-  "notes": "'Testar a busca' (fontes personalizadas) ganha um diagnóstico à prova de falhas: se o diagnóstico normal não vier no retorno da extração por qualquer motivo, agora mostra a resposta bruta que a extensão recebeu, em vez de só dizer 'não encontrei'. Serve pra investigar um caso em que nem o diagnóstico normal nem nenhum erro apareciam.",
+  "version": "1.8.4",
+  "notes": "Corrige a causa real de fontes personalizadas nunca retornarem nada em 'Testar a busca' nem na checagem automática: a função de extração usava constantes declaradas fora dela, e como ela roda injetada sozinha na aba do site (sem acesso ao resto do código), isso quebrava silenciosamente em toda tentativa — sem nenhum erro visível na tela do Hub. Corrigido para a função ficar totalmente autocontida. Se você tem fontes personalizadas cadastradas (qualquer site, não só SharePoint), recarregue a extensão e teste de novo — deve passar a funcionar.",
   "url": "https://github.com/batistela/hub-chamados"
 }
