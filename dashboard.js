@@ -59,6 +59,30 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Tenta ler `raw` como uma URL completa de chamado (colada de uma fonte personalizada) e
+// extrair só o número dela — pra quem prefere colar a URL da barra de endereço em vez de
+// digitar o número igual aparece na tabela da lista. Primeiro tenta um parâmetro de query
+// comum (?id=, ?ticket=, etc.); se não achar, usa o último trecho do caminho que tiver
+// algum dígito. Devolve null se `raw` não for uma URL válida (nesse caso o texto digitado
+// é usado como o próprio número, igual sempre funcionou).
+function extractTicketUrlInfo(raw) {
+  let u;
+  try {
+    u = new URL(raw);
+  } catch (e) {
+    return null;
+  }
+  for (const key of ['id', 'ticket', 'numero', 'number', 'num']) {
+    const v = u.searchParams.get(key);
+    if (v && /\d/.test(v)) return { number: v, url: raw };
+  }
+  const segments = u.pathname.split('/').filter(Boolean);
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (/\d/.test(segments[i])) return { number: decodeURIComponent(segments[i]), url: raw };
+  }
+  return null;
+}
+
 async function loadAll() {
   const { config, state, events, ticketHistory, lastCheck, lastCheckOk, lastCheckError, sourceErrors, updateInfo } = await chrome.storage.local.get([
     'config', 'state', 'events', 'ticketHistory', 'lastCheck', 'lastCheckOk', 'lastCheckError', 'sourceErrors', 'updateInfo',
@@ -347,7 +371,7 @@ function renderCustomSources(config) {
       </label>
       <p class="muted small">Lista: <code>${escapeHtml(source.listUrl || '')}</code> — ${columnCount} coluna(s) mapeada(s)</p>
       <div class="avulso-add">
-        <input type="text" class="cs-avulso-input" placeholder="Número do chamado" />
+        <input type="text" class="cs-avulso-input" placeholder="Número do chamado, ou cole a URL dele" />
         <button class="btn cs-add-avulso">Adicionar</button>
       </div>
       <ul class="avulso-list cs-avulso-list"></ul>
@@ -365,6 +389,7 @@ function renderCustomSources(config) {
       (num) => updateCustomSource(source.id, (s) => {
         s.avulsos = (s.avulsos || []).filter((n) => n !== num);
         if (s.avulsoStaleDays) delete s.avulsoStaleDays[num];
+        if (s.avulsoUrls) delete s.avulsoUrls[num];
       }),
       (num, value) => updateCustomSource(source.id, (s) => {
         s.avulsoStaleDays = applyStaleOverride(s.avulsoStaleDays, num, value);
@@ -376,11 +401,20 @@ function renderCustomSources(config) {
     });
     block.querySelector('.cs-add-avulso').addEventListener('click', () => {
       const input = block.querySelector('.cs-avulso-input');
-      const num = input.value.trim();
-      // Menos rígido que o \d+ das três fontes fixas — fornecedores diferentes podem
-      // usar números de chamado alfanuméricos (ex: "TCK-1234").
-      if (!num || /\s/.test(num)) return;
-      updateCustomSource(source.id, (s) => { s.avulsos = [...new Set([...(s.avulsos || []), num])]; });
+      const raw = input.value.trim();
+      if (!raw) return;
+      // Aceita colar a URL do chamado em vez de digitar o número — mais fácil quando você
+      // já está com a página do chamado aberta. Extrai o número dela (query param comum
+      // primeiro, senão o último trecho do caminho que tiver dígito) e guarda a URL
+      // completa como link direto pra esse chamado (usada no lugar do link achado na
+      // linha da tabela, que às vezes não existe ou não aponta direto pro chamado).
+      const parsedUrl = extractTicketUrlInfo(raw);
+      const num = parsedUrl ? parsedUrl.number : raw;
+      if (!num || /\s/.test(num)) return; // menos rígido que o \d+ das três fontes fixas — números alfanuméricos são aceitos (ex: "TCK-1234")
+      updateCustomSource(source.id, (s) => {
+        s.avulsos = [...new Set([...(s.avulsos || []), num])];
+        if (parsedUrl) s.avulsoUrls = { ...(s.avulsoUrls || {}), [num]: parsedUrl.url };
+      });
       input.value = '';
     });
     wireConfirmButton(block.querySelector('.cs-remove'), 'Confirma? (clique de novo)', () => removeCustomSource(source.id));
@@ -899,6 +933,7 @@ function sanitizeImportedConfig(incoming) {
               columns,
               avulsos: asArrayOfStrings(x.avulsos) || [],
               avulsoStaleDays: asPlainObject(x.avulsoStaleDays) || {},
+              avulsoUrls: asPlainObject(x.avulsoUrls) || {},
               enabled: typeof x.enabled === 'boolean' ? x.enabled : true,
             };
           })

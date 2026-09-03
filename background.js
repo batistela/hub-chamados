@@ -85,11 +85,15 @@ const DEFAULT_CONFIG = {
   // tela onde o fornecedor lista todos os chamados (não numa página de detalhe por
   // número) — cada item tem
   // { id, label, listUrl, columns: {number,status,requester,lastUpdate,lastUpdateBy},
-  //   avulsos: [], avulsoStaleDays: {}, enabled }, onde cada entrada em `columns` (menos
-  // `number`, que é obrigatório) é { tableSelector, columnIndex, headerText }. `id` é um
-  // identificador interno que nunca muda (mesmo se o usuário renomear o `label` depois) —
-  // é ele que assina os dados salvos em state.customAvulsos, então renomear a fonte não
-  // perde histórico.
+  //   avulsos: [], avulsoStaleDays: {}, avulsoUrls: {}, enabled }, onde cada entrada em
+  // `columns` (menos `number`, que é obrigatório) é { tableSelector, columnIndex,
+  // headerText }. `avulsoUrls` é opcional, número -> URL: preenchido quando o usuário
+  // cola a URL do chamado (em vez de digitar só o número) ao adicionar um avulso no
+  // dashboard — usado como link direto pra esse chamado no Hub, com prioridade sobre o
+  // link que a busca na tabela encontrar (ver checkCustomAvulsos). `id` é um identificador
+  // interno que nunca muda (mesmo se o usuário renomear o `label` depois) — é ele que
+  // assina os dados salvos em state.customAvulsos, então renomear a fonte não perde
+  // histórico.
   customSources: [],
   // Não tem mais um campo "updateCheckUrl" aqui — o link do version.json (aviso de
   // versão nova) agora é fixo no código, ver UPDATE_CHECK_URL mais abaixo.
@@ -531,10 +535,15 @@ async function checkCustomAvulsos(tabId, source) {
       'use "Remapear campos" na fonte, no Hub).'
     );
   }
+  const avulsoUrls = source.avulsoUrls || {};
   const out = {};
   for (const num of avulsos) {
     const data = result[num] || { title: '', status: '', notFound: true, number: num };
-    if (!data.url) data.url = source.listUrl;
+    // Prioridade do link mostrado no Hub pra esse chamado: URL que o próprio usuário
+    // colou ao cadastrar o avulso (mais confiável — ele sabe que aponta pro chamado
+    // certo) > link achado na linha da tabela pelo extractCustomListRows > URL da lista
+    // inteira, como último recurso (quando nenhum dos dois existe).
+    data.url = avulsoUrls[num] || data.url || source.listUrl;
     out[num] = data;
   }
   return out;

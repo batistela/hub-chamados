@@ -1,5 +1,5 @@
 {
-  "version": "1.5.0",
-  "notes": "Fontes personalizadas agora buscam a linha certa direto na tela onde o fornecedor lista todos os chamados (mapeamento por coluna, com botão de teste), em vez de exigir uma URL de detalhe por número.",
+  "version": "1.6.0",
+  "notes": "Avulso de fonte personalizada aceita colar a URL do chamado (extrai o número e guarda como link direto), e a descrição da Manutenção de dados no Hub explica melhor a diferença entre Atualizações/Histórico e Histórico por chamado.",
   "url": "https://github.com/batistela/hub-chamados"
 }

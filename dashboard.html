@@ -161,13 +161,13 @@
 
     <section class="card">
       <h2>Manutenção de dados</h2>
-      <p class="muted small">Limpeza do que já foi guardado — não muda a lógica de checagem, só apaga histórico acumulado. Cada botão pede confirmação (clique de novo pra confirmar).</p>
+      <p class="muted small">Limpeza do que já foi guardado — não muda a lógica de checagem, só apaga histórico acumulado. Cada botão pede confirmação (clique de novo pra confirmar). São dois registros SEPARADOS (toda mudança detectada é gravada nos dois ao mesmo tempo, mas cada um guarda de um jeito diferente) — por isso os botões independentes abaixo.</p>
       <div class="maintenance-stats muted small" id="maintenanceStats">Carregando...</div>
       <div class="maintenance-grid">
         <div class="maintenance-item">
           <div>
             <strong>Atualizações recentes / Histórico</strong>
-            <p class="muted small">Apaga eventos de "Atualizações recentes" e "Histórico" (o que aparece na tela inicial). Não afeta o histórico por chamado, nem os dados dos gráficos de tendência.</p>
+            <p class="muted small">A lista única que você vê na tela inicial do Hub, somando todas as fontes (até 5000 no total). Enquanto não marcada como vista fica em "Atualizações recentes" e conta no ícone da extensão; depois de vista, só muda pra aba "Histórico" — continua no mesmo registro. Limpar aqui NÃO apaga o "Histórico por chamado" ao lado, nem os dados dos gráficos de tendência.</p>
           </div>
           <div class="maintenance-controls">
             <label class="muted small">
@@ -181,7 +181,7 @@
         <div class="maintenance-item">
           <div>
             <strong>Histórico por chamado</strong>
-            <p class="muted small">Apaga o histórico usado em "Consultar chamado" (mudanças guardadas por número, mesmo depois de saírem da lista principal).</p>
+            <p class="muted small">Registro separado, por número de chamado (até 2000 por chamado, não 5000 no total) — sem distinção de visto/não visto. É o que "Consultar chamado" usa pra achar tudo que já aconteceu com um número específico, mesmo depois que a mudança já saiu da lista de cima (que é compartilhada entre tudo e satura mais rápido) ou o chamado já saiu da lista principal.</p>
           </div>
           <div class="maintenance-controls">
             <label class="muted small">
