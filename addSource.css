@@ -58,6 +58,50 @@
 .picked-preview { color: var(--primary); }
 .picker-field-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
+.fields-subheading { font-size: 14px; margin: 4px 0 0; }
+
+.picker-field.custom-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.field-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.field-label-input {
+  flex: 1 1 160px;
+  min-width: 120px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--input-bg);
+}
+.field-role-select {
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--input-bg);
+}
+.field-reorder { display: flex; gap: 4px; flex-shrink: 0; }
+.field-reorder button.icon-btn {
+  padding: 4px 8px;
+  line-height: 1;
+}
+.field-row-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .wizard-actions {
   display: flex;
   align-items: center;

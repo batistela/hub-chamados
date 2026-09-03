@@ -2,6 +2,25 @@
 const GLPI_BASE = 'http://chamadosti.holambra.corp';
 const MOVIDESK_BASE = 'https://keyrus-brasil.movidesk.com';
 
+// dashboard.js é um <script> comum, não um módulo — não dá pra importar
+// normalizeCustomListColumns de extractors.js aqui (só addSource.js/background.js
+// conseguem, os dois são módulos ES). Essa é a mesma lógica duplicada: converte o formato
+// antigo de columns (sem `fields`, com status/requester/lastUpdate/lastUpdateBy fixos)
+// pro formato novo, só pra contar quantos campos uma fonte tem mapeado (ver
+// renderCustomSources) — o resto da exibição de fontes personalizadas não precisa
+// entender esse esquema, porque background.js já resolve os papéis antes de gravar em
+// state.customAvulsos (ver checkCustomAvulsos).
+function countMappedColumns(columns) {
+  const cols = columns || {};
+  let n = cols.number ? 1 : 0;
+  if (Array.isArray(cols.fields)) {
+    n += cols.fields.length;
+  } else {
+    for (const k of ['status', 'requester', 'lastUpdate', 'lastUpdateBy']) if (cols[k]) n++;
+  }
+  return n;
+}
+
 const el = (id) => document.getElementById(id);
 
 // Filtros de exibição das tabelas — só afetam o que é mostrado no Hub, não o que é
@@ -364,7 +383,7 @@ function renderCustomSources(config) {
   }
   container.innerHTML = '';
   sources.forEach((source) => {
-    const columnCount = Object.keys(source.columns || {}).length;
+    const columnCount = countMappedColumns(source.columns);
     const block = document.createElement('div');
     block.className = 'custom-source-block';
     block.innerHTML = `
@@ -595,10 +614,15 @@ function fillAvulsoStatusInto(ul, map, linkFn, disabled, configuredCount) {
     } else {
       const title = data.title || '(sem título capturado)';
       const statusTxt = data.status ? ` [${data.status}]` : '';
-      // `requester` só existe pra fontes personalizadas (extractCustomAvulso) — nas
-      // fontes fixas (GLPI/Evolutize/Movidesk) esse campo nunca vem preenchido no
-      // avulso, então essa parte simplesmente não aparece pra elas.
-      const requesterTxt = data.requester ? ` — requerente: ${data.requester}` : '';
+      // `extraFields` só existe pra fontes personalizadas (checkCustomAvulsos, em
+      // background.js) — é a lista livre de campos que o usuário mapeou sem marcar como
+      // "Status"/"Data e hora"/"Quem atualizou" (nome e ordem escolhidos por ele mesmo no
+      // assistente, desde 04/09/2026 — antes era só um "requerente" fixo). Nas fontes
+      // fixas (GLPI/Evolutize/Movidesk) esse campo nunca vem preenchido, então essa parte
+      // simplesmente não aparece pra elas.
+      const extraTxt = data.extraFields && data.extraFields.length
+        ? ' — ' + data.extraFields.map((f) => `${f.label}: ${f.value}`).join(', ')
+        : '';
       const updateTxt = data.lastUpdate
         ? ` — última tramitação: ${data.lastUpdate}${data.lastUpdateBy ? ` (${data.lastUpdateBy})` : ''}`
         : '';
@@ -607,9 +631,9 @@ function fillAvulsoStatusInto(ul, map, linkFn, disabled, configuredCount) {
       // previsível por ID (linkFn).
       const href = data.url || (linkFn ? linkFn(id) : null);
       if (href) {
-        li.innerHTML = `<a href="${href}" target="_blank">${escapeHtml(id)}</a> — ${escapeHtml(title)}${escapeHtml(statusTxt)}${escapeHtml(requesterTxt)}${escapeHtml(updateTxt)}`;
+        li.innerHTML = `<a href="${href}" target="_blank">${escapeHtml(id)}</a> — ${escapeHtml(title)}${escapeHtml(statusTxt)}${escapeHtml(extraTxt)}${escapeHtml(updateTxt)}`;
       } else {
-        li.textContent = `${id} — ${title}${statusTxt}${requesterTxt}${updateTxt}`;
+        li.textContent = `${id} — ${title}${statusTxt}${extraTxt}${updateTxt}`;
       }
     }
     ul.appendChild(li);
@@ -913,23 +937,45 @@ function sanitizeImportedConfig(incoming) {
           .filter((x) => x && typeof x === 'object' && typeof x.url === 'string' && x.url)
           .map((x) => ({ label: typeof x.label === 'string' && x.label ? x.label : x.url, url: x.url }))
       : undefined;
-  const COLUMN_KEYS = ['number', 'status', 'requester', 'lastUpdate', 'lastUpdateBy'];
+  // Formato antigo (antes de 04/09/2026): 4 chaves fixas direto em `columns`. Formato
+  // novo: `columns.fields` é uma lista livre (qualquer quantidade, nome/ordem escolhidos
+  // pelo usuário) — ver normalizeCustomListColumns (extractors.js) pra quem lê depois.
+  // Aqui só valida a FORMA de cada um dos dois, sem converter um no outro — quem lê
+  // (background.js/addSource.js) já sabe entender os dois.
+  const OLD_COLUMN_KEYS = ['status', 'requester', 'lastUpdate', 'lastUpdateBy'];
+  const VALID_FIELD_ROLES = ['status', 'lastUpdate', 'lastUpdateBy', 'info'];
   const asColumnInfo = (v) =>
     v && typeof v === 'object' && !Array.isArray(v) && typeof v.tableSelector === 'string' && Number.isFinite(Number(v.columnIndex))
       ? { tableSelector: v.tableSelector, columnIndex: Number(v.columnIndex), headerText: typeof v.headerText === 'string' ? v.headerText : '' }
       : undefined;
+  const asFieldInfo = (f) => {
+    const col = asColumnInfo(f);
+    if (!col || !f || typeof f.key !== 'string' || !f.key) return undefined;
+    const label = typeof f.label === 'string' && f.label ? f.label : f.key;
+    const role = VALID_FIELD_ROLES.includes(f.role) ? f.role : 'info';
+    return { key: f.key, label, role, ...col };
+  };
+  const asCustomColumns = (v) => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+    const columns = {};
+    const number = asColumnInfo(v.number);
+    if (number) columns.number = number;
+    if (Array.isArray(v.fields)) {
+      columns.fields = v.fields.map(asFieldInfo).filter(Boolean);
+    } else {
+      for (const key of OLD_COLUMN_KEYS) {
+        const col = asColumnInfo(v[key]);
+        if (col) columns[key] = col;
+      }
+    }
+    return columns;
+  };
   const asCustomSources = (v) =>
     Array.isArray(v)
       ? v
           .filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && x.id && typeof x.label === 'string' && x.label && typeof x.listUrl === 'string')
           .map((x) => {
-            const columns = {};
-            if (x.columns && typeof x.columns === 'object' && !Array.isArray(x.columns)) {
-              for (const key of COLUMN_KEYS) {
-                const col = asColumnInfo(x.columns[key]);
-                if (col) columns[key] = col;
-              }
-            }
+            const columns = asCustomColumns(x.columns);
             return {
               id: x.id,
               label: x.label,

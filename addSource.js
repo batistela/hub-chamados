@@ -1,31 +1,44 @@
 // Hub de Chamados — autoria original: Murilo (murilobats@gmail.com), início em ago/2026.
 // Assistente de "adicionar fonte personalizada" — abre a tela onde o fornecedor lista
 // TODOS os chamados (não uma página de detalhe por número, a pedido do Murilo: mais fácil
-// de mapear os campos clicando numa lista já visível), pede pra clicar em cada uma das 5
-// colunas (número, status, requerente, data/hora da atualização, usuário da tramitação),
-// e salva isso em config.customSources. A checagem de verdade (background.js) usa
-// exatamente esse mapeamento depois, via extractCustomListRows (extractors.js) — mesma
-// função usada aqui no botão "Testar", pra garantir que o comportamento é idêntico.
+// de mapear os campos clicando numa lista já visível), pede pra mapear a coluna do
+// "Número do ticket" (única obrigatória e estruturalmente especial — é como o Hub acha a
+// linha certa depois) e, opcionalmente, quantos outros campos o usuário quiser (nome e
+// ordem livres, a pedido do Murilo em 04/09/2026 — antes eram 4 campos fixos com nome
+// travado tipo "Requerente"). Cada campo extra pode receber um "papel"
+// (status/data-hora/quem-atualizou) que conecta ele à detecção inteligente de mudança do
+// Hub sem depender do nome escolhido (ver checkCustomAvulsos, em background.js — essa
+// resolução por papel acontece lá, não aqui). Salva tudo em config.customSources. A
+// checagem de verdade (background.js) usa exatamente esse mapeamento depois, via
+// extractCustomListRows (extractors.js) — mesma função usada aqui no botão "Testar", pra
+// garantir que o comportamento é idêntico.
 
-import { extractCustomListRows } from './extractors.js';
+import { extractCustomListRows, normalizeCustomListColumns } from './extractors.js';
 
 const el = (id) => document.getElementById(id);
 
-const FIELDS = [
-  { key: 'number', label: 'Número do ticket', required: true },
-  { key: 'status', label: 'Status' },
-  { key: 'requester', label: 'Requerente' },
-  { key: 'lastUpdate', label: 'Data e hora da atualização' },
-  { key: 'lastUpdateBy', label: 'Usuário da tramitação' },
+const ROLES = [
+  { value: 'info', label: 'Só mostrar (sem papel especial)' },
+  { value: 'status', label: 'Status' },
+  { value: 'lastUpdate', label: 'Data/hora da atualização' },
+  { value: 'lastUpdateBy', label: 'Quem fez a atualização' },
 ];
 
 let sampleTabId = null;
-// key -> { tableSelector, columnIndex, headerText, preview, fromPrevious? } | 'skipped' | undefined
-let picked = {};
+// { tableSelector, columnIndex, headerText, preview, fromPrevious? } | null
+let numberField = null;
+// Lista livre, na ordem de exibição escolhida pelo usuário — cada item:
+// { key, label, role, tableSelector?, columnIndex?, headerText?, preview?, fromPrevious? }
+// (sem tableSelector = ainda não mapeado; não entra no que é salvo).
+let fields = [];
 let editingSource = null;
 
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function genFieldKey() {
+  return `f-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
 // ---------- tema claro/escuro (mesma lógica do dashboard.js, pra ficar consistente) ----------
@@ -74,16 +87,19 @@ async function initEditMode() {
   el('wizardTitle').textContent = `Remapear colunas — ${found.label}`;
   el('sourceLabel').value = found.label;
   el('sourceListUrl').value = found.listUrl || '';
-  picked = {};
-  Object.entries(found.columns || {}).forEach(([key, col]) => {
-    picked[key] = { ...col, fromPrevious: true };
-  });
+  // normalizeCustomListColumns converte o formato antigo (sem `fields`, com
+  // status/requester/lastUpdate/lastUpdateBy fixos) pro formato novo — assim reabrir uma
+  // fonte cadastrada antes dessa mudança já aparece aqui como campos livres editáveis,
+  // sem perder o mapeamento que já existia.
+  const normalized = normalizeCustomListColumns(found.columns || {});
+  numberField = normalized.number ? { ...normalized.number, fromPrevious: true } : null;
+  fields = (normalized.fields || []).map((f) => ({ ...f, fromPrevious: true }));
   // Mostra o mapeamento já salvo mesmo antes de reabrir a aba — dá pra só corrigir o
   // nome e salvar de novo sem precisar remapear nada, se for só isso que mudou.
   el('stepPicker').classList.remove('hidden');
   el('stepTest').classList.remove('hidden');
   el('stepSave').classList.remove('hidden');
-  renderPickerFields();
+  renderAll();
 }
 
 // ---------- passo 1: abrir a tela com a lista ----------
@@ -143,64 +159,139 @@ async function openSample() {
   el('stepPicker').classList.remove('hidden');
   el('stepTest').classList.remove('hidden');
   el('stepSave').classList.remove('hidden');
-  renderPickerFields();
+  renderAll();
 }
 
 el('btnOpenSample').addEventListener('click', openSample);
 el('btnOpenSampleAgain').addEventListener('click', openSample);
 
 // ---------- passo 2: selecionar colunas ----------
+// "Número do ticket" é a única coluna estruturalmente especial (obrigatória, sem "papel",
+// sem poder remover) — renderizada à parte em #pickerFieldsFixed. Os demais campos são uma
+// lista livre (#pickerFields): quantidade, nome e ordem escolhidos pelo usuário, cada um
+// com um "papel" opcional que conecta ele à detecção inteligente de mudança.
 
 function columnSummary(state) {
   if (state.headerText) return `coluna "${escapeHtml(state.headerText)}"`;
   return `coluna nº ${Number(state.columnIndex) + 1} (sem cabeçalho detectado)`;
 }
 
-function renderPickerFields() {
-  const ul = el('pickerFields');
-  ul.innerHTML = '';
-  FIELDS.forEach((f) => {
-    const state = picked[f.key];
-    const li = document.createElement('li');
-    li.className = 'picker-field';
-    let statusHtml;
-    if (state === 'skipped') {
-      statusHtml = '<span class="muted">pulado — essa coluna não existe nesse site</span>';
-    } else if (state && state.fromPrevious) {
-      statusHtml = `<span class="muted">mapeamento salvo: ${columnSummary(state)} — clique em "Selecionar" pra atualizar</span>`;
-    } else if (state) {
-      statusHtml = `<span class="picked-preview">${columnSummary(state)} — ex: "${escapeHtml((state.preview || '').slice(0, 60))}"</span>`;
-    } else {
-      statusHtml = '<span class="muted">não selecionado ainda</span>';
-    }
-    const requiredTag = f.required ? '<span class="required-tag">obrigatório</span>' : '';
-    const skipBtn = f.required ? '' : `<button class="btn" data-action="skip" data-field="${f.key}">Pular</button>`;
-    li.innerHTML = `
-      <div class="picker-field-label"><strong>${escapeHtml(f.label)}${requiredTag}</strong>${statusHtml}</div>
-      <div class="picker-field-actions">
-        <button class="btn" data-action="pick" data-field="${f.key}">Selecionar</button>
-        ${skipBtn}
-      </div>`;
-    ul.appendChild(li);
-  });
+function renderAll() {
+  renderNumberField();
+  renderCustomFieldsList();
   updateSaveButtonState();
 }
 
-function updateSaveButtonState() {
-  const numberMapped = picked.number && picked.number !== 'skipped';
-  el('btnSaveSource').disabled = !numberMapped;
+function renderNumberField() {
+  const ul = el('pickerFieldsFixed');
+  ul.innerHTML = '';
+  const li = document.createElement('li');
+  li.className = 'picker-field';
+  let statusHtml;
+  if (numberField && numberField.fromPrevious) {
+    statusHtml = `<span class="muted">mapeamento salvo: ${columnSummary(numberField)} — clique em "Selecionar" pra atualizar</span>`;
+  } else if (numberField) {
+    statusHtml = `<span class="picked-preview">${columnSummary(numberField)} — ex: "${escapeHtml((numberField.preview || '').slice(0, 60))}"</span>`;
+  } else {
+    statusHtml = '<span class="muted">não selecionado ainda</span>';
+  }
+  li.innerHTML = `
+    <div class="picker-field-label"><strong>Número do ticket<span class="required-tag">obrigatório</span></strong>${statusHtml}</div>
+    <div class="picker-field-actions">
+      <button class="btn" data-action="pick-number">Selecionar</button>
+    </div>`;
+  ul.appendChild(li);
 }
 
-el('pickerFields').addEventListener('click', (ev) => {
-  const btn = ev.target.closest('button[data-action]');
-  if (!btn) return;
-  const field = btn.dataset.field;
-  if (btn.dataset.action === 'skip') {
-    picked[field] = 'skipped';
-    renderPickerFields();
+function renderCustomFieldsList() {
+  const ul = el('pickerFields');
+  ul.innerHTML = '';
+  if (!fields.length) {
+    ul.innerHTML = '<li class="muted small">Nenhum campo extra adicionado ainda — clique em "+ Adicionar campo" se quiser capturar mais alguma coisa (status, requerente, data, etc.).</li>';
     return;
   }
-  if (btn.dataset.action === 'pick') startPickingField(field);
+  fields.forEach((f, i) => {
+    const li = document.createElement('li');
+    li.className = 'picker-field custom-field';
+    li.dataset.key = f.key;
+    let statusHtml;
+    if (f.tableSelector && f.fromPrevious) {
+      statusHtml = `<span class="muted">mapeamento salvo: ${columnSummary(f)} — clique em "Selecionar" pra atualizar</span>`;
+    } else if (f.tableSelector) {
+      statusHtml = `<span class="picked-preview">${columnSummary(f)} — ex: "${escapeHtml((f.preview || '').slice(0, 60))}"</span>`;
+    } else {
+      statusHtml = '<span class="muted">coluna ainda não selecionada</span>';
+    }
+    const roleOptions = ROLES.map((r) => `<option value="${r.value}"${f.role === r.value ? ' selected' : ''}>${escapeHtml(r.label)}</option>`).join('');
+    li.innerHTML = `
+      <div class="field-row-top">
+        <input type="text" class="field-label-input" value="${escapeHtml(f.label || '')}" placeholder="Nome do campo (ex: Requerente)" />
+        <select class="field-role-select">${roleOptions}</select>
+        <div class="field-reorder">
+          <button class="btn icon-btn" data-action="up" ${i === 0 ? 'disabled' : ''} title="Mover pra cima">▲</button>
+          <button class="btn icon-btn" data-action="down" ${i === fields.length - 1 ? 'disabled' : ''} title="Mover pra baixo">▼</button>
+          <button class="btn danger icon-btn" data-action="remove" title="Remover campo">✕</button>
+        </div>
+      </div>
+      <div class="field-row-bottom">
+        ${statusHtml}
+        <button class="btn" data-action="pick">Selecionar</button>
+      </div>`;
+    ul.appendChild(li);
+  });
+}
+
+function updateSaveButtonState() {
+  el('btnSaveSource').disabled = !(numberField && numberField.tableSelector);
+}
+
+function moveField(key, delta) {
+  const idx = fields.findIndex((f) => f.key === key);
+  if (idx < 0) return;
+  const newIdx = idx + delta;
+  if (newIdx < 0 || newIdx >= fields.length) return;
+  const [item] = fields.splice(idx, 1);
+  fields.splice(newIdx, 0, item);
+  renderAll();
+}
+
+el('pickerFieldsFixed').addEventListener('click', (ev) => {
+  if (ev.target.closest('button[data-action="pick-number"]')) startPickingField('__number__');
+});
+
+el('btnAddField').addEventListener('click', () => {
+  fields.push({ key: genFieldKey(), label: `Campo ${fields.length + 1}`, role: 'info' });
+  renderAll();
+});
+
+el('pickerFields').addEventListener('click', (ev) => {
+  const li = ev.target.closest('li[data-key]');
+  if (!li) return;
+  const key = li.dataset.key;
+  const btn = ev.target.closest('button[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (action === 'pick') startPickingField(key);
+  if (action === 'remove') { fields = fields.filter((f) => f.key !== key); renderAll(); }
+  if (action === 'up') moveField(key, -1);
+  if (action === 'down') moveField(key, 1);
+});
+
+// Atualiza o estado direto, sem re-renderizar a lista inteira — evita perder o foco/cursor
+// no meio da digitação do nome do campo (renderAll() recria o DOM da lista).
+el('pickerFields').addEventListener('input', (ev) => {
+  const li = ev.target.closest('li[data-key]');
+  if (!li) return;
+  const f = fields.find((x) => x.key === li.dataset.key);
+  if (!f) return;
+  if (ev.target.classList.contains('field-label-input')) f.label = ev.target.value;
+});
+el('pickerFields').addEventListener('change', (ev) => {
+  const li = ev.target.closest('li[data-key]');
+  if (!li) return;
+  const f = fields.find((x) => x.key === li.dataset.key);
+  if (!f) return;
+  if (ev.target.classList.contains('field-role-select')) f.role = ev.target.value;
 });
 
 async function startPickingField(fieldKey) {
@@ -208,7 +299,7 @@ async function startPickingField(fieldKey) {
     el('pickerStatus').textContent = 'Nenhuma tela aberta — clique em "Reabrir a tela" primeiro.';
     return;
   }
-  const fieldLabel = FIELDS.find((f) => f.key === fieldKey).label;
+  const fieldLabel = fieldKey === '__number__' ? 'Número do ticket' : (fields.find((f) => f.key === fieldKey)?.label || 'campo selecionado');
   el('pickerStatus').textContent = `Clique em qualquer célula da coluna "${fieldLabel}" na aba que foi trazida pra frente (Esc cancela).`;
   try {
     await chrome.tabs.update(sampleTabId, { active: true });
@@ -362,9 +453,19 @@ function injectPicker(fieldKey) {
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === 'hubFieldPicked') {
-    picked[msg.field] = { tableSelector: msg.tableSelector, columnIndex: msg.columnIndex, headerText: msg.headerText, preview: msg.preview };
-    renderPickerFields();
-    const fieldLabel = FIELDS.find((f) => f.key === msg.field)?.label || msg.field;
+    const sel = { tableSelector: msg.tableSelector, columnIndex: msg.columnIndex, headerText: msg.headerText, preview: msg.preview };
+    let fieldLabel = msg.field;
+    if (msg.field === '__number__') {
+      numberField = sel;
+      fieldLabel = 'Número do ticket';
+    } else {
+      const f = fields.find((x) => x.key === msg.field);
+      if (f) {
+        Object.assign(f, sel, { fromPrevious: false });
+        fieldLabel = f.label || msg.field;
+      }
+    }
+    renderAll();
     el('pickerStatus').textContent = `Coluna de "${fieldLabel}" capturada${msg.headerText ? ` (cabeçalho: "${msg.headerText}")` : ''}.`;
   }
   if (msg?.type === 'hubFieldPickError') {
@@ -384,12 +485,24 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 // ---------- passo 3: testar ----------
 
-function buildColumnsFromPicked() {
-  const columns = {};
-  FIELDS.forEach((f) => {
-    const p = picked[f.key];
-    if (p && p !== 'skipped') columns[f.key] = { tableSelector: p.tableSelector, columnIndex: p.columnIndex, headerText: p.headerText };
-  });
+// Só entram no que é testado/salvo os campos extras que já têm uma coluna mapeada — um
+// campo adicionado mas ainda não clicado simplesmente não vai junto (fica só na tela até o
+// usuário mapear ou remover).
+function buildColumns() {
+  const columns = { fields: [] };
+  if (numberField && numberField.tableSelector) {
+    columns.number = { tableSelector: numberField.tableSelector, columnIndex: numberField.columnIndex, headerText: numberField.headerText };
+  }
+  columns.fields = fields
+    .filter((f) => f.tableSelector)
+    .map((f) => ({
+      key: f.key,
+      label: (f.label || '').trim() || 'Campo',
+      role: f.role || 'info',
+      tableSelector: f.tableSelector,
+      columnIndex: f.columnIndex,
+      headerText: f.headerText,
+    }));
   return columns;
 }
 
@@ -403,7 +516,7 @@ el('btnTestLookup').addEventListener('click', async () => {
     el('testResult').textContent = 'Informe um número de chamado pra testar.';
     return;
   }
-  const columns = buildColumnsFromPicked();
+  const columns = buildColumns();
   if (!columns.number) {
     el('testResult').textContent = 'Mapeie a coluna "Número do ticket" primeiro.';
     return;
@@ -423,12 +536,9 @@ el('btnTestLookup').addEventListener('click', async () => {
     if (!row || row.notFound) {
       el('testResult').textContent = `Não encontrei o chamado ${num} nessa lista — pode estar filtrado/fora da página atual, ou o mapeamento de colunas não bateu. Confira se a coluna "Número do ticket" foi mapeada certa.`;
     } else {
-      el('testResult').textContent =
-        `Encontrado — status: "${row.status || '—'}"` +
-        (columns.requester ? `, requerente: "${row.requester || '—'}"` : '') +
-        (columns.lastUpdate ? `, última atualização: "${row.lastUpdate || '—'}"` : '') +
-        (columns.lastUpdateBy && row.lastUpdateBy ? ` (${row.lastUpdateBy})` : '') +
-        '.';
+      const rowFields = row.fields || {};
+      const parts = columns.fields.map((f) => `${f.label}: "${rowFields[f.key] || '—'}"`).join(', ');
+      el('testResult').textContent = `Encontrado${parts ? ` — ${parts}` : ''}.`;
     }
   } catch (e) {
     el('testResult').textContent = `Erro ao testar: ${(e && e.message) || e}`;
@@ -452,7 +562,7 @@ el('btnSaveSource').addEventListener('click', async () => {
     el('pickerStatus').textContent = 'Informe a URL da lista antes de salvar.';
     return;
   }
-  const columns = buildColumnsFromPicked();
+  const columns = buildColumns();
   if (!columns.number) {
     el('pickerStatus').textContent = 'Mapeie a coluna "Número do ticket" antes de salvar — é como o Hub encontra a linha certa.';
     return;

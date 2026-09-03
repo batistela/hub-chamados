@@ -445,10 +445,25 @@ export async function runMovidesk() {
 // <table> nem esses papéis ARIA (ex: puro <div> sem nenhuma semântica de tabela) ainda não
 // são suportadas.
 //
-// `columns` = { number, status, requester, lastUpdate, lastUpdateBy } — cada um
-// (exceto number, que é obrigatório) opcionalmente um objeto
-// { tableSelector, columnIndex, headerText }. `numbers` = lista de números de chamado
-// que essa checagem está procurando na grade.
+// `columns` — a pedido do Murilo (04/09/2026), os campos além do número não são mais um
+// conjunto fixo de 4 nomes conhecidos: `{ number: {tableSelector,columnIndex,headerText},
+// fields: [{key,label,role,tableSelector,columnIndex,headerText}, ...] }`. `number`
+// continua sendo o único campo estruturalmente especial e obrigatório (é como o Hub acha a
+// linha certa). `fields` é uma lista LIVRE — o usuário escolhe quantos campos quer, o nome
+// (`label`) de cada um, e a ORDEM (a ordem do array = ordem de exibição no Hub). `role`
+// (opcional, `'info'` se ausente) é o que conecta um campo à detecção inteligente de
+// mudança sem depender do NOME do campo: `'status'` alimenta a mensagem "X → Y" de mudança
+// de status, `'lastUpdate'` alimenta "nova tramitação em..." e o aviso de "chamado
+// parado", `'lastUpdateBy'` só complementa a mensagem de `'lastUpdate'` com "por fulano".
+// Só o primeiro campo de cada papel é usado se o usuário marcar mais de um com o mesmo
+// papel (ver checkCustomAvulsos em background.js, que faz essa resolução por papel — essa
+// função aqui é "burra": só extrai o texto de cada `fields[i]` pela posição/cabeçalho
+// mapeado, sem saber nada sobre papéis). Formato antigo (antes dessa mudança, sem
+// `fields`, com `status/requester/lastUpdate/lastUpdateBy` como chaves fixas direto em
+// `columns`) ainda é aceito aqui — normalizeCustomListColumns (função irmã, não injetada,
+// usada por background.js/addSource.js) converte pro formato novo; como essa função
+// PRECISA ficar self-contained (é injetada sozinha via chrome.scripting.executeScript),
+// ela tem sua própria normalização inline equivalente, duplicada de propósito.
 //
 // Se a grade mapeada não for mais encontrada (seletor não bate com nada E não existe
 // nenhuma outra grade com linhas na página), devolve pageError — trata como sessão
@@ -456,6 +471,24 @@ export async function runMovidesk() {
 // pra não confundir isso com "os chamados sumiram". Já um chamado específico não aparecer
 // na grade (mas ela existir normalmente) é tratado como notFound — situação normal
 // (chamado fechado/fora do filtro atual), não erro.
+//
+// Versão não-injetada da normalização acima — usada por background.js (pra resolver quem
+// é o campo de status/data/etc. por PAPEL antes de montar o objeto que diffAvulsoSource
+// espera) e por addSource.js (pra pré-preencher o assistente em modo "Remapear campos"
+// com uma fonte salva antes dessa mudança). NÃO é chamada de dentro de
+// extractCustomListRows (que precisa ficar self-contained pra injeção).
+export function normalizeCustomListColumns(columns) {
+  const cols = columns || {};
+  if (Array.isArray(cols.fields)) {
+    return { number: cols.number || null, fields: cols.fields };
+  }
+  const fields = [];
+  if (cols.status) fields.push({ key: 'status', label: 'Status', role: 'status', ...cols.status });
+  if (cols.requester) fields.push({ key: 'requester', label: 'Requerente', role: 'info', ...cols.requester });
+  if (cols.lastUpdate) fields.push({ key: 'lastUpdate', label: 'Data e hora da atualização', role: 'lastUpdate', ...cols.lastUpdate });
+  if (cols.lastUpdateBy) fields.push({ key: 'lastUpdateBy', label: 'Usuário da tramitação', role: 'lastUpdateBy', ...cols.lastUpdateBy });
+  return { number: cols.number || null, fields };
+}
 //
 // IMPORTANTE (adicionado depois de testar com SharePoint de verdade): grades ARIA como as
 // do SharePoint costumam ser preenchidas por JavaScript DEPOIS que a página já "terminou
@@ -473,7 +506,20 @@ const CUSTOM_ROW_SEL = 'tr, [role="row"]';
 const CUSTOM_CELL_SEL = 'td, th, [role="gridcell"], [role="columnheader"], [role="cell"], [role="rowheader"]';
 
 export async function extractCustomListRows(columns, numbers) {
-  const cols = columns || {};
+  const rawCols = columns || {};
+  // Normalização inline do formato antigo (sem `fields`) — duplicada de
+  // normalizeCustomListColumns de propósito, ver comentário acima: essa função precisa
+  // ficar self-contained pra ser injetada sozinha via chrome.scripting.executeScript.
+  const numberCol = rawCols.number || null;
+  let fieldList = Array.isArray(rawCols.fields) ? rawCols.fields : null;
+  if (!fieldList) {
+    fieldList = [];
+    if (rawCols.status) fieldList.push({ key: 'status', ...rawCols.status });
+    if (rawCols.requester) fieldList.push({ key: 'requester', ...rawCols.requester });
+    if (rawCols.lastUpdate) fieldList.push({ key: 'lastUpdate', ...rawCols.lastUpdate });
+    if (rawCols.lastUpdateBy) fieldList.push({ key: 'lastUpdateBy', ...rawCols.lastUpdateBy });
+  }
+
   const wanted = Array.from(new Set((numbers || []).map(String)));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -516,7 +562,7 @@ export async function extractCustomListRows(columns, numbers) {
   let allRows = [];
   const deadline = Date.now() + 12000;
   do {
-    grid = findGrid(cols.number && cols.number.tableSelector);
+    grid = findGrid(numberCol && numberCol.tableSelector);
     allRows = grid ? rowsOf(grid) : [];
     if (grid && allRows.length >= 2) break;
     await sleep(500);
@@ -540,14 +586,13 @@ export async function extractCustomListRows(columns, numbers) {
     return typeof colInfo.columnIndex === 'number' ? colInfo.columnIndex : -1;
   }
 
-  const idx = {
-    number: resolveIndex(cols.number),
-    status: resolveIndex(cols.status),
-    requester: resolveIndex(cols.requester),
-    lastUpdate: resolveIndex(cols.lastUpdate),
-    lastUpdateBy: resolveIndex(cols.lastUpdateBy),
-  };
-  if (idx.number < 0) return { pageError: 'sem-tabela' };
+  const numberIdx = resolveIndex(numberCol);
+  if (numberIdx < 0) return { pageError: 'sem-tabela' };
+  // Índice resolvido por CAMPO (não por nome fixo) — `fields` é uma lista livre definida
+  // pelo usuário no assistente, cada item já sabendo sua própria `key` (gerada uma vez,
+  // nunca muda) e opcionalmente um `role` (que essa função nem olha — quem decide o que
+  // fazer com cada papel é checkCustomAvulsos, em background.js).
+  const resolvedFields = fieldList.map((f) => ({ key: f.key, idx: resolveIndex(f) }));
 
   const bodyRows = allRows.slice(1);
 
@@ -558,7 +603,7 @@ export async function extractCustomListRows(columns, numbers) {
   }
   function rowLink(row) {
     const cells = cellsOf(row);
-    const numCell = cells[idx.number];
+    const numCell = cells[numberIdx];
     const a = (numCell && numCell.querySelector('a[href]')) || row.querySelector('a[href]');
     return a ? new URL(a.getAttribute('href'), document.baseURI).toString() : '';
   }
@@ -567,7 +612,7 @@ export async function extractCustomListRows(columns, numbers) {
   const stillWanted = new Set(wanted);
   for (const row of bodyRows) {
     if (!stillWanted.size) break;
-    const numTxt = cellText(row, idx.number);
+    const numTxt = cellText(row, numberIdx);
     if (!numTxt) continue;
     // Casa por igualdade exata primeiro (mais seguro); senão por "contém" — números de
     // chamado às vezes vêm com prefixo/sufixo na grade (ex: "#12345", "12345 (e-mail)").
@@ -579,20 +624,13 @@ export async function extractCustomListRows(columns, numbers) {
       }
     }
     if (!matched) continue;
-    out[matched] = {
-      title: '',
-      number: numTxt,
-      status: cellText(row, idx.status),
-      requester: cellText(row, idx.requester),
-      lastUpdate: cellText(row, idx.lastUpdate),
-      lastUpdateBy: cellText(row, idx.lastUpdateBy),
-      url: rowLink(row),
-      notFound: false,
-    };
+    const fieldsOut = {};
+    for (const rf of resolvedFields) fieldsOut[rf.key] = cellText(row, rf.idx);
+    out[matched] = { number: numTxt, fields: fieldsOut, url: rowLink(row), notFound: false };
     stillWanted.delete(matched);
   }
   for (const want of stillWanted) {
-    out[want] = { title: '', number: want, status: '', notFound: true };
+    out[want] = { number: want, fields: {}, notFound: true };
   }
   return out;
 }

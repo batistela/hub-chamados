@@ -9,6 +9,7 @@ import {
   runMovidesk,
   extractMovideskAvulso,
   extractCustomListRows,
+  normalizeCustomListColumns,
 } from './extractors.js';
 
 const GLPI_BASE = 'http://chamadosti.holambra.corp';
@@ -84,10 +85,21 @@ const DEFAULT_CONFIG = {
   // (acompanha números específicos, não a lista inteira), mas a BUSCA em si acontece na
   // tela onde o fornecedor lista todos os chamados (não numa página de detalhe por
   // número) — cada item tem
-  // { id, label, listUrl, columns: {number,status,requester,lastUpdate,lastUpdateBy},
-  //   avulsos: [], avulsoStaleDays: {}, avulsoUrls: {}, enabled }, onde cada entrada em
-  // `columns` (menos `number`, que é obrigatório) é { tableSelector, columnIndex,
-  // headerText }. `avulsoUrls` é opcional, número -> URL: preenchido quando o usuário
+  // { id, label, listUrl, columns: {number: {tableSelector,columnIndex,headerText}, fields:
+  //   [{key,label,role,tableSelector,columnIndex,headerText}, ...]}, avulsos: [],
+  //   avulsoStaleDays: {}, avulsoUrls: {}, enabled }. `number` continua sendo o único
+  // campo estruturalmente especial e obrigatório (é como o Hub acha a linha certa).
+  // `fields` (desde 04/09/2026 — antes era um objeto fixo com 4 chaves conhecidas) é uma
+  // lista LIVRE definida pelo usuário no assistente: qualquer quantidade de campos,
+  // qualquer `label` (nome de exibição), na ordem que ele escolher. `role` (opcional,
+  // 'info' se ausente) é o que conecta um campo à detecção inteligente de mudança sem
+  // depender do nome escolhido — ver checkCustomAvulsos, que resolve por PAPEL
+  // ('status'/'lastUpdate'/'lastUpdateBy') qual campo alimenta a mensagem de mudança de
+  // status/nova tramitação/chamado parado; os demais (papel 'info' ou nenhum) só aparecem
+  // como informação extra no Hub. Fontes salvas antes dessa mudança (sem `fields`, com
+  // `status/requester/lastUpdate/lastUpdateBy` fixos direto em `columns`) continuam
+  // funcionando — normalizeCustomListColumns (extractors.js) converte pro formato novo
+  // sempre que lido. `avulsoUrls` é opcional, número -> URL: preenchido quando o usuário
   // cola a URL do chamado (em vez de digitar só o número) ao adicionar um avulso no
   // dashboard — usado como link direto pra esse chamado no Hub, com prioridade sobre o
   // link que a busca na tabela encontrar (ver checkCustomAvulsos). `id` é um identificador
@@ -520,6 +532,18 @@ async function checkMovideskAvulsos(tabId, numbers) {
 // avulsos configurados pra essa fonte de uma vez (ver extractCustomListRows). Mais rápido
 // (não abre N páginas pra N chamados) e é exatamente o fluxo que o Murilo pediu: buscar
 // na tela onde todos os chamados aparecem, não numa página específica por número.
+//
+// extractCustomListRows é "burra" de propósito: só devolve o texto bruto de cada campo
+// mapeado (`fields: {key: valor}`), sem saber o que cada um SIGNIFICA. É aqui que isso é
+// resolvido — a pedido do Murilo (04/09/2026), os campos além do número não têm mais nome
+// fixo (não precisa se chamar "Requerente"): cada campo tem um `role` opcional
+// ('status'/'lastUpdate'/'lastUpdateBy'/'info') que diz qual papel ele cumpre, e é por
+// PAPEL (não por nome) que a gente pega o campo certo pra alimentar diffAvulsoSource (que
+// continua exatamente igual — só espera `status`/`lastUpdate`/`lastUpdateBy` prontos no
+// objeto, sem saber que agora vêm de um mapeamento livre). Só o primeiro campo de cada
+// papel conta, se o usuário marcar mais de um com o mesmo papel sem querer. Campos sem
+// papel (ou com papel 'info') não entram na detecção de mudança — só são exibidos no Hub
+// como informação extra (`extraFields`), no lugar do antigo campo fixo "requester".
 async function checkCustomAvulsos(tabId, source) {
   const avulsos = source.avulsos || [];
   if (!avulsos.length) return {};
@@ -535,15 +559,38 @@ async function checkCustomAvulsos(tabId, source) {
       'use "Remapear campos" na fonte, no Hub).'
     );
   }
+  const normalized = normalizeCustomListColumns(source.columns);
+  const fieldByRole = (role) => normalized.fields.find((f) => f.role === role);
+  const statusField = fieldByRole('status');
+  const lastUpdateField = fieldByRole('lastUpdate');
+  const lastUpdateByField = fieldByRole('lastUpdateBy');
+  // Todo campo que não é nenhum dos três papéis acima — sem papel definido, papel 'info',
+  // ou um papel desconhecido de uma versão futura — é só informativo.
+  const infoFields = normalized.fields.filter(
+    (f) => f !== statusField && f !== lastUpdateField && f !== lastUpdateByField
+  );
+
   const avulsoUrls = source.avulsoUrls || {};
   const out = {};
   for (const num of avulsos) {
-    const data = result[num] || { title: '', status: '', notFound: true, number: num };
+    const raw = result[num] || { number: num, fields: {}, notFound: true };
+    const rawFields = raw.fields || {};
+    const data = {
+      title: '',
+      number: raw.number || num,
+      status: statusField ? rawFields[statusField.key] || '' : '',
+      lastUpdate: lastUpdateField ? rawFields[lastUpdateField.key] || '' : '',
+      lastUpdateBy: lastUpdateByField ? rawFields[lastUpdateByField.key] || '' : '',
+      notFound: !!raw.notFound,
+      extraFields: infoFields
+        .map((f) => ({ label: f.label || f.key, value: rawFields[f.key] || '' }))
+        .filter((f) => f.value),
+    };
     // Prioridade do link mostrado no Hub pra esse chamado: URL que o próprio usuário
     // colou ao cadastrar o avulso (mais confiável — ele sabe que aponta pro chamado
     // certo) > link achado na linha da tabela pelo extractCustomListRows > URL da lista
     // inteira, como último recurso (quando nenhum dos dois existe).
-    data.url = avulsoUrls[num] || data.url || source.listUrl;
+    data.url = avulsoUrls[num] || raw.url || source.listUrl;
     out[num] = data;
   }
   return out;
