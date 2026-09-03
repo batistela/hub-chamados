@@ -367,8 +367,9 @@ async function removeCustomSource(id) {
   // background.js podar sozinho na próxima checagem (o que já faz, mas não custa nada
   // já deixar limpo aqui pra UI não mostrar lixo até lá).
   const { state } = await chrome.storage.local.get('state');
-  if (state && state.customAvulsos && state.customAvulsos[id]) {
-    delete state.customAvulsos[id];
+  if (state && ((state.customAvulsos && state.customAvulsos[id]) || (state.customList && state.customList[id]))) {
+    if (state.customAvulsos) delete state.customAvulsos[id];
+    if (state.customList) delete state.customList[id];
     await chrome.storage.local.set({ state });
   }
   loadAll();
@@ -392,11 +393,20 @@ function renderCustomSources(config) {
         <input type="checkbox" class="cs-enabled" ${source.enabled !== false ? 'checked' : ''} />
         Verificar esta fonte
       </label>
+      <label class="checkbox-row small source-listmode-row">
+        <input type="checkbox" class="cs-listmode" ${source.listMode ? 'checked' : ''} />
+        Rastrear automaticamente todo chamado que aparece nessa lista (como GLPI/Evolutize/Movidesk) — sem precisar informar o número
+      </label>
       <p class="muted small">Lista: <code>${escapeHtml(source.listUrl || '')}</code> — ${columnCount} coluna(s) mapeada(s)</p>
+      <label class="small cs-avulso-url-row">
+        URL separada só pra busca de avulsos (opcional — deixe em branco pra usar a mesma lista acima; preencha se os avulsos ficam numa tela diferente, ex: sem o filtro "atribuídos a mim")
+        <input type="text" class="cs-avulso-url" placeholder="Deixe em branco pra usar a URL da lista" value="${escapeHtml(source.avulsoListUrl || '')}" />
+      </label>
       <div class="avulso-add">
         <input type="text" class="cs-avulso-input" placeholder="Número do chamado, ou cole a URL dele" />
         <button class="btn cs-add-avulso">Adicionar</button>
       </div>
+      <p class="muted small">Avulsos (chamados fora da lista automática, acompanhados um por um):</p>
       <ul class="avulso-list cs-avulso-list"></ul>
       <div class="custom-source-actions">
         <a href="addSource.html?edit=${encodeURIComponent(source.id)}" class="btn">Remapear campos</a>
@@ -421,6 +431,15 @@ function renderCustomSources(config) {
 
     block.querySelector('.cs-enabled').addEventListener('change', (ev) => {
       updateCustomSource(source.id, (s) => { s.enabled = ev.target.checked; });
+    });
+    block.querySelector('.cs-listmode').addEventListener('change', (ev) => {
+      updateCustomSource(source.id, (s) => { s.listMode = ev.target.checked; });
+    });
+    // 'change' (não 'input') de propósito — só grava quando o usuário sai do campo, não a
+    // cada tecla, senão updateCustomSource re-renderizaria o bloco todo (perdendo o foco)
+    // no meio da digitação.
+    block.querySelector('.cs-avulso-url').addEventListener('change', (ev) => {
+      updateCustomSource(source.id, (s) => { s.avulsoListUrl = ev.target.value.trim(); });
     });
     block.querySelector('.cs-add-avulso').addEventListener('click', () => {
       const input = block.querySelector('.cs-avulso-input');
@@ -470,6 +489,39 @@ function renderCustomAvulsoStatus(state, config) {
   });
 }
 
+// "Modo lista" (04/09/2026) — só entram aqui as fontes com listMode ligado; reaproveita
+// fillAvulsoStatusInto (já lida com id/title/status/extraFields/lastUpdate genericamente)
+// em vez de montar uma tabela de colunas fixas, porque os campos de cada fonte
+// personalizada são livres/variáveis — o mesmo motivo que a área de avulsos acima já usa
+// lista em vez de tabela.
+function renderCustomListStatus(state, config) {
+  const wrap = el('customListStatusGrid');
+  const sources = (config.customSources || []).filter((s) => s.listMode);
+  if (!sources.length) {
+    wrap.innerHTML = '';
+    wrap.classList.add('hidden');
+    el('countCustomList').textContent = '';
+    return;
+  }
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = '';
+  let total = 0;
+  sources.forEach((source) => {
+    const div = document.createElement('div');
+    const h3 = document.createElement('h3');
+    h3.textContent = source.label;
+    const ul = document.createElement('ul');
+    ul.className = 'avulso-status-list';
+    div.appendChild(h3);
+    div.appendChild(ul);
+    wrap.appendChild(div);
+    const map = (state.customList && state.customList[source.id]) || {};
+    total += Object.keys(map).length;
+    fillAvulsoStatusInto(ul, map, null, source.enabled === false, 0, 'Nenhum chamado encontrado nessa lista ainda (ou ainda não verificado).');
+  });
+  el('countCustomList').textContent = total ? `(${total})` : '';
+}
+
 // "Consultar chamado" também precisa listar as fontes personalizadas cadastradas, não só
 // as três fixas — senão não dá pra filtrar a busca por elas (buscar em "Todas as fontes"
 // ainda funciona sem isso, só o filtro específico que ficaria faltando).
@@ -502,6 +554,7 @@ function renderState(state) {
   fillAvulsoStatus('mdAvulsoStatus', state.movideskAvulsos || {}, (id) => `${MOVIDESK_BASE}/Ticket/Edit/${id}`, mdDisabled, (lastConfig.movideskAvulsos || []).length);
 
   renderCustomAvulsoStatus(state, lastConfig);
+  renderCustomListStatus(state, lastConfig);
 }
 
 function applyTableFilter(entries, filter) {
@@ -593,7 +646,7 @@ function fillAvulsoStatus(listId, map, linkFn, disabled, configuredCount) {
   fillAvulsoStatusInto(el(listId), map, linkFn, disabled, configuredCount);
 }
 
-function fillAvulsoStatusInto(ul, map, linkFn, disabled, configuredCount) {
+function fillAvulsoStatusInto(ul, map, linkFn, disabled, configuredCount, emptyMessage) {
   ul.innerHTML = '';
   if (disabled) {
     ul.innerHTML = configuredCount
@@ -603,7 +656,7 @@ function fillAvulsoStatusInto(ul, map, linkFn, disabled, configuredCount) {
   }
   const entries = Object.entries(map);
   if (!entries.length) {
-    ul.innerHTML = '<li class="muted">Nenhum chamado avulso configurado.</li>';
+    ul.innerHTML = `<li class="muted">${escapeHtml(emptyMessage || 'Nenhum chamado avulso configurado.')}</li>`;
     return;
   }
   entries.forEach(([id, data]) => {
@@ -943,7 +996,7 @@ function sanitizeImportedConfig(incoming) {
   // Aqui só valida a FORMA de cada um dos dois, sem converter um no outro — quem lê
   // (background.js/addSource.js) já sabe entender os dois.
   const OLD_COLUMN_KEYS = ['status', 'requester', 'lastUpdate', 'lastUpdateBy'];
-  const VALID_FIELD_ROLES = ['status', 'lastUpdate', 'lastUpdateBy', 'info'];
+  const VALID_FIELD_ROLES = ['status', 'lastUpdate', 'lastUpdateBy', 'title', 'info'];
   const asColumnInfo = (v) =>
     v && typeof v === 'object' && !Array.isArray(v) && typeof v.tableSelector === 'string' && Number.isFinite(Number(v.columnIndex))
       ? {
@@ -989,6 +1042,12 @@ function sanitizeImportedConfig(incoming) {
               id: x.id,
               label: x.label,
               listUrl: x.listUrl,
+              // avulsoListUrl (opcional, 04/09/2026): URL separada só pra busca de
+              // avulsos, quando é diferente da usada pelo modo lista.
+              avulsoListUrl: typeof x.avulsoListUrl === 'string' ? x.avulsoListUrl : '',
+              // listMode (04/09/2026): liga o rastreio automático de TODO chamado que
+              // aparece em listUrl, como os demais rastreadores.
+              listMode: typeof x.listMode === 'boolean' ? x.listMode : false,
               columns,
               avulsos: asArrayOfStrings(x.avulsos) || [],
               avulsoStaleDays: asPlainObject(x.avulsoStaleDays) || {},

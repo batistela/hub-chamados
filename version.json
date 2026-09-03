@@ -1,5 +1,5 @@
 {
-  "version": "1.8.4",
-  "notes": "Corrige a causa real de fontes personalizadas nunca retornarem nada em 'Testar a busca' nem na checagem automática: a função de extração usava constantes declaradas fora dela, e como ela roda injetada sozinha na aba do site (sem acesso ao resto do código), isso quebrava silenciosamente em toda tentativa — sem nenhum erro visível na tela do Hub. Corrigido para a função ficar totalmente autocontida. Se você tem fontes personalizadas cadastradas (qualquer site, não só SharePoint), recarregue a extensão e teste de novo — deve passar a funcionar.",
+  "version": "1.9.0",
+  "notes": "Fontes personalizadas ganham 'modo lista': ligue 'Rastrear automaticamente' numa fonte e ela passa a acompanhar TODO chamado que aparece na URL cadastrada, sozinha — novo chamado, mudança de status e chamado que some da lista, sem precisar informar número nenhum (funciona do mesmo jeito que GLPI/Evolutize/Movidesk). Avulsos continuam existindo, agora pensados pra chamados que NÃO aparecem nessa lista (com opção de usar uma URL separada só pra eles). Também ganhou o papel 'Título' pros campos livres, usado no rastreio automático.",
   "url": "https://github.com/batistela/hub-chamados"
 }

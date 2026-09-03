@@ -81,31 +81,42 @@ const DEFAULT_CONFIG = {
   // pelo dashboard.js pra renderizar links, o background.js nunca lê isso.
   customLinks: [],
   // Fontes de chamados cadastradas pelo próprio usuário (sites de fornecedores/parceiros
-  // que o Hub não conhece de fábrica) — cadastradas via addSource.html. Só modo avulso
-  // (acompanha números específicos, não a lista inteira), mas a BUSCA em si acontece na
-  // tela onde o fornecedor lista todos os chamados (não numa página de detalhe por
-  // número) — cada item tem
-  // { id, label, listUrl, columns: {number: {tableSelector,columnIndex,headerText}, fields:
-  //   [{key,label,role,tableSelector,columnIndex,headerText}, ...]}, avulsos: [],
+  // que o Hub não conhece de fábrica) — cadastradas via addSource.html. Duas formas de
+  // acompanhar, que podem coexistir na MESMA fonte (a pedido do Murilo, 04/09/2026):
+  // "modo lista" (`listMode: true` — rastreia automaticamente TODO chamado que aparece em
+  // `listUrl`, do mesmo jeito que GLPI/Evolutize/Movidesk fazem com a pesquisa salva deles:
+  // novo chamado, mudança de status e chamado que some da lista são todos detectados
+  // sozinhos, sem precisar informar número nenhum — ver checkCustomList/diffListSource) e
+  // "modo avulso" (acompanha só os números em `avulsos[]`, um por um — pensado pra
+  // chamados que NÃO aparecem em `listUrl`, ex: atribuídos a outra pessoa, fora do filtro
+  // usado no modo lista, etc.). Cada item tem
+  // { id, label, listUrl, avulsoListUrl, listMode,
+  //   columns: {number: {tableSelector,columnIndex,columnKey,headerText}, fields:
+  //   [{key,label,role,tableSelector,columnIndex,columnKey,headerText}, ...]}, avulsos: [],
   //   avulsoStaleDays: {}, avulsoUrls: {}, enabled }. `number` continua sendo o único
   // campo estruturalmente especial e obrigatório (é como o Hub acha a linha certa).
   // `fields` (desde 04/09/2026 — antes era um objeto fixo com 4 chaves conhecidas) é uma
   // lista LIVRE definida pelo usuário no assistente: qualquer quantidade de campos,
   // qualquer `label` (nome de exibição), na ordem que ele escolher. `role` (opcional,
-  // 'info' se ausente) é o que conecta um campo à detecção inteligente de mudança sem
-  // depender do nome escolhido — ver checkCustomAvulsos, que resolve por PAPEL
-  // ('status'/'lastUpdate'/'lastUpdateBy') qual campo alimenta a mensagem de mudança de
-  // status/nova tramitação/chamado parado; os demais (papel 'info' ou nenhum) só aparecem
-  // como informação extra no Hub. Fontes salvas antes dessa mudança (sem `fields`, com
-  // `status/requester/lastUpdate/lastUpdateBy` fixos direto em `columns`) continuam
-  // funcionando — normalizeCustomListColumns (extractors.js) converte pro formato novo
-  // sempre que lido. `avulsoUrls` é opcional, número -> URL: preenchido quando o usuário
-  // cola a URL do chamado (em vez de digitar só o número) ao adicionar um avulso no
-  // dashboard — usado como link direto pra esse chamado no Hub, com prioridade sobre o
-  // link que a busca na tabela encontrar (ver checkCustomAvulsos). `id` é um identificador
-  // interno que nunca muda (mesmo se o usuário renomear o `label` depois) — é ele que
-  // assina os dados salvos em state.customAvulsos, então renomear a fonte não perde
-  // histórico.
+  // 'info' se ausente; pode ser 'title' desde o modo lista) é o que conecta um campo à
+  // detecção inteligente de mudança sem depender do nome escolhido — ver
+  // checkCustomAvulsos/checkCustomList, que resolvem por PAPEL
+  // ('status'/'lastUpdate'/'lastUpdateBy'/'title') qual campo alimenta a mensagem de
+  // mudança de status/nova tramitação/chamado parado/título exibido; os demais (papel
+  // 'info' ou nenhum) só aparecem como informação extra no Hub. Fontes salvas antes dessa
+  // mudança (sem `fields`, com `status/requester/lastUpdate/lastUpdateBy` fixos direto em
+  // `columns`) continuam funcionando — normalizeCustomListColumns (extractors.js) converte
+  // pro formato novo sempre que lido. `avulsoListUrl` é opcional: quando ausente, o modo
+  // avulso busca na mesma `listUrl` do modo lista (comportamento de sempre); só precisa ser
+  // preenchido se os avulsos ficam numa tela DIFERENTE (ex: `listUrl` é uma visão filtrada
+  // "atribuídos a mim" usada pro modo lista, e os avulsos são chamados de outra pessoa que
+  // só aparecem numa visão sem esse filtro). `avulsoUrls` é opcional, número -> URL:
+  // preenchido quando o usuário cola a URL do chamado (em vez de digitar só o número) ao
+  // adicionar um avulso no dashboard — usado como link direto pra esse chamado no Hub, com
+  // prioridade sobre o link que a busca na tabela encontrar (ver checkCustomAvulsos). `id`
+  // é um identificador interno que nunca muda (mesmo se o usuário renomear o `label`
+  // depois) — é ele que assina os dados salvos em state.customAvulsos/state.customList,
+  // então renomear a fonte não perde histórico.
   customSources: [],
   // Não tem mais um campo "updateCheckUrl" aqui — o link do version.json (aviso de
   // versão nova) agora é fixo no código, ver UPDATE_CHECK_URL mais abaixo.
@@ -136,6 +147,11 @@ async function getState() {
       movidesk: {},
       movideskAvulsos: {},
       customAvulsos: {},
+      // "Modo lista" (04/09/2026) — chamados rastreados automaticamente na URL cadastrada da
+      // fonte, um mapa por fonte igual state.customAvulsos, mas no formato de LISTA COMPLETA
+      // (id -> ticket), do mesmo jeito que state.glpi/evolutize/movidesk — não um mapa por
+      // número pedido.
+      customList: {},
       staleAlerted: {},
     }
   );
@@ -547,10 +563,15 @@ async function checkMovideskAvulsos(tabId, numbers) {
 async function checkCustomAvulsos(tabId, source) {
   const avulsos = source.avulsos || [];
   if (!avulsos.length) return {};
-  if (!source.listUrl) {
+  // avulsoListUrl é opcional (04/09/2026) — só existe pra quando os avulsos ficam numa
+  // tela DIFERENTE da usada pelo modo lista (ex: listUrl é uma visão filtrada "atribuídos
+  // a mim", e os avulsos são chamados de outra pessoa, fora desse filtro). Sem isso
+  // configurado, continua buscando na mesma listUrl de sempre.
+  const searchUrl = source.avulsoListUrl || source.listUrl;
+  if (!searchUrl) {
     throw new Error('Nenhuma URL de lista configurada pra essa fonte.');
   }
-  await navigateAndWait(tabId, source.listUrl);
+  await navigateAndWait(tabId, searchUrl);
   const result = await exec(tabId, extractCustomListRows, [source.columns || {}, avulsos]);
   if (!result || result.pageError) {
     throw new Error(
@@ -561,13 +582,14 @@ async function checkCustomAvulsos(tabId, source) {
   }
   const normalized = normalizeCustomListColumns(source.columns);
   const fieldByRole = (role) => normalized.fields.find((f) => f.role === role);
+  const titleField = fieldByRole('title');
   const statusField = fieldByRole('status');
   const lastUpdateField = fieldByRole('lastUpdate');
   const lastUpdateByField = fieldByRole('lastUpdateBy');
-  // Todo campo que não é nenhum dos três papéis acima — sem papel definido, papel 'info',
-  // ou um papel desconhecido de uma versão futura — é só informativo.
+  // Todo campo que não é nenhum dos papéis estruturais acima — sem papel definido, papel
+  // 'info', ou um papel desconhecido de uma versão futura — é só informativo.
   const infoFields = normalized.fields.filter(
-    (f) => f !== statusField && f !== lastUpdateField && f !== lastUpdateByField
+    (f) => f !== statusField && f !== titleField && f !== lastUpdateField && f !== lastUpdateByField
   );
 
   const avulsoUrls = source.avulsoUrls || {};
@@ -576,7 +598,10 @@ async function checkCustomAvulsos(tabId, source) {
     const raw = result[num] || { number: num, fields: {}, notFound: true };
     const rawFields = raw.fields || {};
     const data = {
-      title: '',
+      // Antes sempre vazio (nenhum papel de título existia) — agora usa o campo marcado
+      // como "Título" quando o usuário mapeou um (desde o modo lista, 04/09/2026); segue
+      // vazio se nenhum campo tiver esse papel, como sempre foi.
+      title: titleField ? rawFields[titleField.key] || '' : '',
       number: raw.number || num,
       status: statusField ? rawFields[statusField.key] || '' : '',
       lastUpdate: lastUpdateField ? rawFields[lastUpdateField.key] || '' : '',
@@ -594,6 +619,62 @@ async function checkCustomAvulsos(tabId, source) {
     out[num] = data;
   }
   return out;
+}
+
+// "Modo lista" (04/09/2026, a pedido do Murilo — "quero que funcione do mesmo jeito que
+// os demais rastreadores"): em vez de procurar só números específicos, lê TODA linha da
+// grade em `source.listUrl` e devolve um ARRAY de chamados (não um mapa por número pedido,
+// como checkCustomAvulsos) — pra alimentar diffListSource, a mesma função de diff usada
+// pelas listas do GLPI/Evolutize/Movidesk (detecta chamado novo, mudança de status, e
+// chamado que sumiu da lista = "provavelmente encerrado", automaticamente). A resolução de
+// papel (status/lastUpdate/lastUpdateBy/title -> info) é a mesma lógica de
+// checkCustomAvulsos, só que devolvendo `{id, title, status, lastUpdate, lastUpdateBy,
+// url, extraFields}` por linha em vez de um mapa por número. Sempre busca em
+// `source.listUrl` (não em `avulsoListUrl`, que é só pro modo avulso) — é exatamente a
+// tela que se quer rastrear por completo.
+async function checkCustomList(tabId, source) {
+  if (!source.listUrl) {
+    throw new Error('Nenhuma URL de lista configurada pra essa fonte.');
+  }
+  await navigateAndWait(tabId, source.listUrl);
+  const result = await exec(tabId, extractCustomListRows, [source.columns || {}, null, true]);
+  if (!result || result.pageError) {
+    throw new Error(
+      'Não encontrei nenhuma tabela de chamados nessa página — sessão expirada, página não ' +
+      'carregou, ou o mapeamento de colunas não bate mais com o layout do site (nesse caso, ' +
+      'use "Remapear campos" na fonte, no Hub).'
+    );
+  }
+  const normalized = normalizeCustomListColumns(source.columns);
+  const fieldByRole = (role) => normalized.fields.find((f) => f.role === role);
+  const titleField = fieldByRole('title');
+  const statusField = fieldByRole('status');
+  const lastUpdateField = fieldByRole('lastUpdate');
+  const lastUpdateByField = fieldByRole('lastUpdateBy');
+  const infoFields = normalized.fields.filter(
+    (f) => f !== statusField && f !== titleField && f !== lastUpdateField && f !== lastUpdateByField
+  );
+
+  const list = [];
+  for (const key of Object.keys(result)) {
+    if (key === '__debug') continue;
+    const raw = result[key];
+    const rawFields = raw.fields || {};
+    list.push({
+      // `id` é o próprio número lido na linha — não existe um "pedido" pra comparar contra
+      // aqui, diferente do modo avulso. diffListSource usa isso como chave do state.
+      id: raw.number || key,
+      title: titleField ? rawFields[titleField.key] || '' : '',
+      status: statusField ? rawFields[statusField.key] || '' : '',
+      lastUpdate: lastUpdateField ? rawFields[lastUpdateField.key] || '' : '',
+      lastUpdateBy: lastUpdateByField ? rawFields[lastUpdateByField.key] || '' : '',
+      url: raw.url || source.listUrl,
+      extraFields: infoFields
+        .map((f) => ({ label: f.label || f.key, value: rawFields[f.key] || '' }))
+        .filter((f) => f.value),
+    });
+  }
+  return list;
 }
 
 // ---------- diffing ----------
@@ -777,10 +858,20 @@ function checkStaleTickets(config, state) {
     { key: 'movidesk', label: 'Movidesk (avulso)', map: state.movideskAvulsos || {}, avulso: true, overrides: config.movideskAvulsoStaleDays },
   ];
 
-  // Fontes personalizadas — sempre avulso, então entram no mesmo formato dos outros
-  // "(avulso)" acima, uma entrada por fonte cadastrada.
+  // Fontes personalizadas — entram no mesmo formato das fixas acima: uma entrada
+  // "sem sufixo" (avulso:false, sem overrides) pro modo lista quando ligado — igual
+  // state.glpi/evolutize/movidesk — e uma entrada "(avulso)" pros números acompanhados
+  // individualmente, sempre que houver.
   for (const source of config.customSources || []) {
     if (!source || !source.id) continue;
+    if (source.listMode) {
+      sources.push({
+        key: `custom:${source.id}:lista`,
+        label: source.label,
+        map: (state.customList || {})[source.id] || {},
+        avulso: false,
+      });
+    }
     sources.push({
       key: `custom:${source.id}`,
       label: `${source.label} (avulso)`,
@@ -1165,29 +1256,51 @@ async function runCheck() {
         }
       }
 
-      // Fontes personalizadas — sempre avulso (ver DEFAULT_CONFIG.customSources). Cada
-      // fonte é independente: se uma falhar (ex: permissão de domínio revogada, site fora
-      // do ar), só ela fica com erro — não afeta as outras nem as três fontes fixas acima.
+      // Fontes personalizadas — ver DEFAULT_CONFIG.customSources. Cada fonte é
+      // independente: se uma falhar (ex: permissão de domínio revogada, site fora do ar),
+      // só ela fica com erro — não afeta as outras nem as três fontes fixas acima. Modo
+      // lista e modo avulso, quando os dois estão ligados na mesma fonte, são checados e
+      // reportados SEPARADAMENTE (blocos try/catch próprios) — uma falha num não impede o
+      // outro de rodar.
       state.customAvulsos = state.customAvulsos || {};
+      state.customList = state.customList || {};
       for (const source of config.customSources || []) {
         if (!source || !source.id) continue;
-        if (source.enabled === false || !(source.avulsos || []).length) continue;
-        try {
-          const results = await checkCustomAvulsos(tabId, source);
-          const { resultMap, events } = diffAvulsoSource(`${source.label} (avulso)`, state.customAvulsos[source.id] || {}, results);
-          state.customAvulsos[source.id] = resultMap;
-          allEvents.push(...events);
-        } catch (e) {
-          console.error(`Falha ao checar fonte personalizada ${source.label}`, e);
-          errors[`custom:${source.id}`] = String(e && e.message ? e.message : e);
+        if (source.enabled === false) continue;
+
+        if (source.listMode) {
+          try {
+            const list = await checkCustomList(tabId, source);
+            const { nextMap, events } = diffListSource(source.label, state.customList[source.id] || {}, list, { trackLastUpdate: true });
+            state.customList[source.id] = nextMap;
+            allEvents.push(...events);
+          } catch (e) {
+            console.error(`Falha ao checar lista da fonte personalizada ${source.label}`, e);
+            errors[`custom:${source.id}:lista`] = String(e && e.message ? e.message : e);
+          }
+        }
+
+        if ((source.avulsos || []).length) {
+          try {
+            const results = await checkCustomAvulsos(tabId, source);
+            const { resultMap, events } = diffAvulsoSource(`${source.label} (avulso)`, state.customAvulsos[source.id] || {}, results);
+            state.customAvulsos[source.id] = resultMap;
+            allEvents.push(...events);
+          } catch (e) {
+            console.error(`Falha ao checar avulsos da fonte personalizada ${source.label}`, e);
+            errors[`custom:${source.id}`] = String(e && e.message ? e.message : e);
+          }
         }
       }
       // Poda o estado de fontes personalizadas que já foram removidas da configuração —
-      // senão fica um resto órfão em state.customAvulsos que nunca mais é atualizado nem
-      // exibido em lugar nenhum.
+      // senão fica um resto órfão em state.customAvulsos/state.customList que nunca mais é
+      // atualizado nem exibido em lugar nenhum.
       const validCustomIds = new Set((config.customSources || []).map((s) => s.id));
       for (const id of Object.keys(state.customAvulsos)) {
         if (!validCustomIds.has(id)) delete state.customAvulsos[id];
+      }
+      for (const id of Object.keys(state.customList)) {
+        if (!validCustomIds.has(id)) delete state.customList[id];
       }
     });
 

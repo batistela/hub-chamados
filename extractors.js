@@ -501,7 +501,7 @@ export function normalizeCustomListColumns(columns) {
 // dado, por até 12s — assim que aparecer, segue na hora; só desiste (pageError) se passar
 // o teto todo sem nada. Uma <table> comum do GLPI já vem pronta no primeiro carregamento,
 // então esse caso só espera 0 vezes e segue igual a antes.
-export async function extractCustomListRows(columns, numbers) {
+export async function extractCustomListRows(columns, numbers, returnAllRows) {
   // IMPORTANTE (bug real encontrado em 04/09/2026, não uma particularidade do
   // SharePoint): essa função é injetada sozinha via chrome.scripting.executeScript, que
   // serializa só o CORPO dela (Function.prototype.toString()) e reconstrói/roda isso numa
@@ -648,28 +648,45 @@ export async function extractCustomListRows(columns, numbers) {
   }
 
   const out = {};
-  const stillWanted = new Set(wanted);
-  for (const row of bodyRows) {
-    if (!stillWanted.size) break;
-    const numTxt = cellTextFor(row, numberCol, numberIdx);
-    if (!numTxt) continue;
-    // Casa por igualdade exata primeiro (mais seguro); senão por "contém" — números de
-    // chamado às vezes vêm com prefixo/sufixo na grade (ex: "#12345", "12345 (e-mail)").
-    let matched = null;
-    for (const want of stillWanted) {
-      if (numTxt === want || numTxt.includes(want)) {
-        matched = want;
-        break;
-      }
+  if (returnAllRows) {
+    // "Modo lista" (04/09/2026, a pedido do Murilo): em vez de procurar só os números
+    // pedidos, devolve TODA linha da grade — cada uma vira um chamado rastreado
+    // automaticamente, do mesmo jeito que GLPI/Evolutize/Movidesk fazem com a pesquisa
+    // salva deles. Ignora `wanted`/`numbers` por completo; a chave de cada entrada é o
+    // próprio texto lido na coluna do número (não precisa bater com nada pré-definido).
+    // Uma linha com número vazio (ex: linha de rodapé/paginação que a grade às vezes
+    // inclui) é ignorada; um número repetido mantém só a primeira ocorrência.
+    for (const row of bodyRows) {
+      const numTxt = cellTextFor(row, numberCol, numberIdx);
+      if (!numTxt || out[numTxt]) continue;
+      const fieldsOut = {};
+      for (const rf of resolvedFields) fieldsOut[rf.key] = cellTextFor(row, rf.colInfo, rf.idx);
+      out[numTxt] = { number: numTxt, fields: fieldsOut, url: rowLink(row), notFound: false };
     }
-    if (!matched) continue;
-    const fieldsOut = {};
-    for (const rf of resolvedFields) fieldsOut[rf.key] = cellTextFor(row, rf.colInfo, rf.idx);
-    out[matched] = { number: numTxt, fields: fieldsOut, url: rowLink(row), notFound: false };
-    stillWanted.delete(matched);
-  }
-  for (const want of stillWanted) {
-    out[want] = { number: want, fields: {}, notFound: true };
+  } else {
+    const stillWanted = new Set(wanted);
+    for (const row of bodyRows) {
+      if (!stillWanted.size) break;
+      const numTxt = cellTextFor(row, numberCol, numberIdx);
+      if (!numTxt) continue;
+      // Casa por igualdade exata primeiro (mais seguro); senão por "contém" — números de
+      // chamado às vezes vêm com prefixo/sufixo na grade (ex: "#12345", "12345 (e-mail)").
+      let matched = null;
+      for (const want of stillWanted) {
+        if (numTxt === want || numTxt.includes(want)) {
+          matched = want;
+          break;
+        }
+      }
+      if (!matched) continue;
+      const fieldsOut = {};
+      for (const rf of resolvedFields) fieldsOut[rf.key] = cellTextFor(row, rf.colInfo, rf.idx);
+      out[matched] = { number: numTxt, fields: fieldsOut, url: rowLink(row), notFound: false };
+      stillWanted.delete(matched);
+    }
+    for (const want of stillWanted) {
+      out[want] = { number: want, fields: {}, notFound: true };
+    }
   }
   // Diagnóstico — só pra ajudar a entender um "não encontrei" quando o mapeamento PARECE
   // certo (ex: o Murilo via um chamado na tela e mesmo assim a busca não achou). Não é lido

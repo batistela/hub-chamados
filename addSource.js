@@ -19,6 +19,7 @@ const el = (id) => document.getElementById(id);
 
 const ROLES = [
   { value: 'info', label: 'Só mostrar (sem papel especial)' },
+  { value: 'title', label: 'Título' },
   { value: 'status', label: 'Status' },
   { value: 'lastUpdate', label: 'Data/hora da atualização' },
   { value: 'lastUpdateBy', label: 'Quem fez a atualização' },
@@ -620,7 +621,7 @@ el('btnSaveSource').addEventListener('click', async () => {
     const idx = list.findIndex((s) => s.id === editingSource.id);
     if (idx !== -1) list[idx] = { ...list[idx], label, listUrl, columns };
   } else {
-    list.push({ id: genId(), label, listUrl, columns, avulsos: [], avulsoStaleDays: {}, avulsoUrls: {}, enabled: true });
+    list.push({ id: genId(), label, listUrl, avulsoListUrl: '', listMode: false, columns, avulsos: [], avulsoStaleDays: {}, avulsoUrls: {}, enabled: true });
   }
   cfg.customSources = list;
   await chrome.storage.local.set({ config: cfg });

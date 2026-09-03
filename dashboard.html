@@ -113,8 +113,14 @@
         <h2>Fontes personalizadas</h2>
         <a href="addSource.html" class="btn primary">+ Adicionar fonte personalizada</a>
       </div>
-      <p class="muted small">Chamados de outros sites de fornecedores/parceiros que o Hub não conhece de fábrica — acompanhados um por vez pelo número, buscando a linha certa na tela onde o site lista todos os chamados (você indica as colunas certas na hora de cadastrar).</p>
+      <p class="muted small">Chamados de outros sites de fornecedores/parceiros que o Hub não conhece de fábrica — você indica as colunas certas na hora de cadastrar. Duas formas de acompanhar, que podem ser usadas juntas na mesma fonte: rastreio automático de tudo que aparece na lista cadastrada (como GLPI/Evolutize/Movidesk), e avulsos (chamados específicos, acompanhados um por um pelo número — pensados pra chamados que não aparecem nessa lista).</p>
       <div id="customSourcesList"></div>
+    </section>
+
+    <section class="card">
+      <h2>Fontes personalizadas — lista automática <span id="countCustomList" class="count"></span></h2>
+      <p class="muted small">Chamados detectados automaticamente nas fontes com "Rastrear automaticamente" ligado — novo chamado, mudança de status e chamado que some da lista aparecem sozinhos em "Atualizações recentes", sem precisar cadastrar o número.</p>
+      <div class="avulsos-status-grid hidden" id="customListStatusGrid"></div>
     </section>
 
     <section class="card">
