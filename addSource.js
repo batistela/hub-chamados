@@ -542,11 +542,20 @@ el('btnTestLookup').addEventListener('click', async () => {
   }
   el('testResult').textContent = 'Testando...';
   try {
-    const [{ result }] = await chrome.scripting.executeScript({
+    const results = await chrome.scripting.executeScript({
       target: { tabId: sampleTabId },
       func: extractCustomListRows,
       args: [columns, [num]],
     });
+    // Diagnóstico bruto de tudo o que chrome.scripting.executeScript devolveu — não deveria
+    // ser necessário no caminho normal (o __debug abaixo já cobre isso), mas serve de rede de
+    // segurança pra casos raros em que nem o pageError nem o __debug esperado vêm no retorno
+    // (ex: mais de um frame respondendo, ou algum erro engolido silenciosamente pela API do
+    // Chrome em vez de rejeitar a promise). Ver console da PÁGINA DO ASSISTENTE (não a aba do
+    // site) pra esse log, se precisar.
+    console.log('[Hub] executeScript resultado bruto:', results);
+    const entry = results && results[0];
+    const result = entry && entry.result;
     if (result && result.pageError) {
       el('testResult').textContent = 'Não encontrei nenhuma tabela nessa página — confira se a aba ainda está na tela certa.';
       return;
@@ -558,6 +567,16 @@ el('btnTestLookup').addEventListener('click', async () => {
       if (dbg) {
         const sample = (dbg.numberColumnSample || []).map((v) => `"${v || '—'}"`).join(', ') || '(nenhum valor lido)';
         extra = ` [diagnóstico: grade ${dbg.gridInfo}, ${dbg.totalBodyRows} linha(s) de dado, cabeçalho da coluna "Número do ticket" = "${dbg.numberColumnHeaderText || '(vazio)'}", primeiros valores vistos nessa coluna: ${sample}]`;
+      } else {
+        // O __debug normal não veio — mostra o que realmente voltou, pra não ficar cego.
+        let raw;
+        try {
+          raw = JSON.stringify(results);
+        } catch (err) {
+          raw = String(results);
+        }
+        if (raw && raw.length > 600) raw = raw.slice(0, 600) + '…';
+        extra = ` [diagnóstico indisponível — resposta bruta da extração: ${raw === undefined ? 'undefined' : raw}]`;
       }
       el('testResult').textContent = `Não encontrei o chamado ${num} nessa lista — pode estar filtrado/fora da página atual, ou o mapeamento de colunas não bateu. Confira se a coluna "Número do ticket" foi mapeada certa.${extra}`;
     } else {
@@ -566,7 +585,7 @@ el('btnTestLookup').addEventListener('click', async () => {
       el('testResult').textContent = `Encontrado${parts ? ` — ${parts}` : ''}.`;
     }
   } catch (e) {
-    el('testResult').textContent = `Erro ao testar: ${(e && e.message) || e}`;
+    el('testResult').textContent = `Erro ao testar: ${(e && e.message) || e}${e && e.stack ? ' | ' + e.stack.split('\n').slice(0, 3).join(' > ') : ''}`;
   }
 });
 
