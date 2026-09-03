@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
-  "notes": "Retentativa automática e espera adaptativa na leitura da Evolutize, hiperlinks nas atualizações recentes, e aviso de versão nova com botão de download do .zip (este mecanismo).",
+  "version": "1.2.0",
+  "notes": "Tema claro/escuro, nova página de métricas (BI com tendências, atividade e rankings), histórico diário pra gráficos, e correção do falso positivo \"Conteúdo do chamado mudou\" nos avulsos do GLPI/Movidesk.",
   "url": "https://github.com/batistela/hub-chamados"
 }
