@@ -10,17 +10,21 @@ Hoje o Hub (`dashboard.css`) só tem um tema (claro), com as cores fixas em `:ro
 
 Implementado: cores convertidas pra variáveis CSS, com um tema escuro completo (segue `prefers-color-scheme` por padrão, ou pode ser forçado manualmente pelo botão 🌓 no topbar — ciclo automático → claro → escuro). A escolha manual fica salva (`uiTheme` no storage) e vale pras duas páginas do Hub (`dashboard.html` e a nova `metrics.html`).
 
-## Botão pra limpar o histórico de alterações, com controle
+## Botão pra limpar o histórico de alterações, com controle — feito
 
-Registrado em: 03/09/2026.
+Registrado em: 03/09/2026. Implementado em: 03/09/2026.
 
-Hoje não tem como limpar `events` (Atualizações recentes/Histórico) nem `ticketHistory` (histórico por chamado) — só cresce (até os limites de 5000/2000 por chamado). A ideia é um botão de limpeza com mais controle do que "apagar tudo de uma vez": por idade (ex: "limpar atualizações com mais de N dias"), separando "Atualizações/Histórico" de "histórico por chamado", com confirmação em duas etapas antes de apagar de verdade. Complexidade baixa — é só filtrar o que já está salvo, sem mudar a lógica de checagem. Bom momento pra isso: dá pra usar já de cara pra limpar o ruído das falsas "Conteúdo do chamado mudou" de antes da correção de hoje.
+Hoje não tem como limpar `events` (Atualizações recentes/Histórico) nem `ticketHistory` (histórico por chamado) — só cresce (até os limites de 5000/2000 por chamado). A ideia é um botão de limpeza com mais controle do que "apagar tudo de uma vez": por idade (ex: "limpar atualizações com mais de N dias"), separando "Atualizações/Histórico" de "histórico por chamado", com confirmação em duas etapas antes de apagar de verdade.
 
-## Habilitar/desabilitar cada fonte por analista
+Implementado: novo card "Manutenção de dados" no Hub, com um contador (quantos registros existem em cada store, e a data do mais antigo) e dois botões independentes — um pra "Atualizações recentes/Histórico" (`events`), outro pra "Histórico por chamado" (`ticketHistory`) — cada um com um campo "mais antigo que N dias" (0 = apaga tudo) e confirmação em duas etapas (clique uma vez pra armar, clique de novo em até 4s pra confirmar). A lógica de checagem não mudou em nada — é só filtragem do que já estava salvo.
 
-Registrado em: 03/09/2026.
+## Habilitar/desabilitar cada fonte por analista — feito
 
-Hoje "mostrar só os avulsos" existe pra cada fonte, mas não dá pra desligar uma fonte inteira — nem os avulsos. Tem analista sem acesso ao Movidesk (por exemplo), que hoje mesmo assim tem a checagem tentando entrar lá toda vez, gerando erro de "sessão" falso e perdendo tempo à toa. A ideia é um checkbox por fonte (GLPI/Evolutize/Movidesk) que pula a checagem inteira quando desmarcado — não só os avulsos — e esconde/esmaece a seção correspondente no Hub. Complexidade baixa — estende o mesmo padrão de config que já existe pra "só avulsos".
+Registrado em: 03/09/2026. Implementado em: 03/09/2026.
+
+Hoje "mostrar só os avulsos" existe pra cada fonte, mas não dá pra desligar uma fonte inteira — nem os avulsos. Tem analista sem acesso ao Movidesk (por exemplo), que hoje mesmo assim tem a checagem tentando entrar lá toda vez, gerando erro de "sessão" falso e perdendo tempo à toa. A ideia é um checkbox por fonte (GLPI/Evolutize/Movidesk) que pula a checagem inteira quando desmarcado — não só os avulsos — e esconde/esmaece a seção correspondente no Hub.
+
+Implementado: checkbox "Verificar esta fonte" no topo do bloco de configuração de cada fonte (GLPI/Evolutize/Movidesk), marcado por padrão. Desmarcado, o `background.js` pula a fonte inteira (lista + avulsos, sem abrir nenhuma página) na próxima checagem, sem gerar erro de "sessão" — e o Hub esmaece o card da tabela, o bloco de configuração de avulsos e a coluna de status de avulsos daquela fonte, com um selo "desativada".
 
 ## Suporte a outros fornecedores/sites de chamados, configurável pelo usuário
 

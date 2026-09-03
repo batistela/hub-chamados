@@ -15,6 +15,7 @@ const tableFilters = {
 };
 const CLOSED_STATUS_RE = /encerr|fechad|solucion|resolvid|cancel|conclu[ií]d/i;
 let lastState = {};
+let lastConfig = {};
 
 // ---------- tema claro/escuro ----------
 // Guardado em uma chave própria do storage (não dentro de `config`) — é preferência
@@ -55,13 +56,15 @@ function fmtEventTime(ts) {
 }
 
 async function loadAll() {
-  const { config, state, events, lastCheck, lastCheckOk, lastCheckError, sourceErrors, updateInfo } = await chrome.storage.local.get([
-    'config', 'state', 'events', 'lastCheck', 'lastCheckOk', 'lastCheckError', 'sourceErrors', 'updateInfo',
+  const { config, state, events, ticketHistory, lastCheck, lastCheckOk, lastCheckError, sourceErrors, updateInfo } = await chrome.storage.local.get([
+    'config', 'state', 'events', 'ticketHistory', 'lastCheck', 'lastCheckOk', 'lastCheckError', 'sourceErrors', 'updateInfo',
   ]);
   lastState = state || {};
-  renderConfig(config || {});
+  lastConfig = config || {};
+  renderConfig(lastConfig);
   renderState(lastState);
   renderEvents(events || []);
+  renderMaintenanceStats(events || [], ticketHistory || {});
   renderStatus(lastCheck, lastCheckOk, lastCheckError);
   renderSourceErrors(sourceErrors || {});
   renderUpdateBanner(updateInfo);
@@ -128,6 +131,9 @@ function renderConfig(config) {
   el('glpiOnlyAvulsos').checked = !!config.glpiOnlyAvulsos;
   el('evolutizeOnlyAvulsos').checked = !!config.evolutizeOnlyAvulsos;
   el('movideskOnlyAvulsos').checked = !!config.movideskOnlyAvulsos;
+  el('glpiEnabled').checked = config.glpiEnabled !== false;
+  el('evolutizeEnabled').checked = config.evolutizeEnabled !== false;
+  el('movideskEnabled').checked = config.movideskEnabled !== false;
   renderAvulsoList('glpiAvulsoList', config.glpiAvulsos || [], config.glpiAvulsoStaleDays || {}, removeGlpiAvulso, updateGlpiAvulsoStale);
   renderAvulsoList('evoAvulsoList', config.evolutizeAvulsos || [], config.evolutizeAvulsoStaleDays || {}, removeEvoAvulso, updateEvoAvulsoStale);
   renderAvulsoList('mdAvulsoList', config.movideskAvulsos || [], config.movideskAvulsoStaleDays || {}, removeMdAvulso, updateMdAvulsoStale);
@@ -137,6 +143,26 @@ function renderConfig(config) {
   el('hideClosedGlpi').checked = tableFilters.glpi.hideClosed;
   el('filterEvo').value = tableFilters.evo.search;
   el('hideClosedEvo').checked = tableFilters.evo.hideClosed;
+
+  updateSourceDisabledUI(config);
+}
+
+// Esconde/esmaece a UI de uma fonte desligada (checkbox "Verificar esta fonte" nas
+// Configurações) — o card da tabela, o bloco de config de avulsos e a coluna de status
+// de avulsos correspondentes, mais um selo "desativada" nos dois lugares onde faz
+// sentido (título do card e dentro do bloco de configuração).
+function updateSourceDisabledUI(config) {
+  const apply = (enabled, cardId, avulsoConfigId, avulsoStatusColId, cardBadgeId, configBadgeId) => {
+    const disabled = enabled === false;
+    el(cardId)?.classList.toggle('source-disabled', disabled);
+    el(avulsoConfigId)?.classList.toggle('source-disabled', disabled);
+    el(avulsoStatusColId)?.classList.toggle('source-disabled', disabled);
+    el(cardBadgeId)?.classList.toggle('hidden', !disabled);
+    el(configBadgeId)?.classList.toggle('hidden', !disabled);
+  };
+  apply(config.glpiEnabled, 'cardGlpi', 'glpiAvulsoConfig', 'glpiAvulsoStatusCol', 'glpiCardDisabledBadge', 'glpiDisabledBadge');
+  apply(config.evolutizeEnabled, 'cardEvo', 'evoAvulsoConfig', 'evoAvulsoStatusCol', 'evoCardDisabledBadge', 'evoDisabledBadge');
+  apply(config.movideskEnabled, 'cardMd', 'mdAvulsoConfig', 'mdAvulsoStatusCol', 'mdCardDisabledBadge', 'mdDisabledBadge');
 }
 
 function renderAvulsoList(listId, items, staleOverrides, onRemove, onStaleChange) {
@@ -263,13 +289,18 @@ async function removeCustomLink(idx) {
 }
 
 function renderState(state) {
-  fillTable('tableGlpi', 'countGlpi', state.glpi || {}, (id) => `${GLPI_BASE}/front/ticket.form.php?id=${id}`, ['title', 'status', 'requester', 'lastUpdate', 'lastUpdateBy'], tableFilters.glpi);
-  fillTable('tableEvo', 'countEvo', state.evolutize || {}, null, ['title', 'status', 'lastUpdate'], tableFilters.evo);
-  fillTable('tableMd', 'countMd', state.movidesk || {}, (id) => `${MOVIDESK_BASE}/Ticket/Edit/${id}`, ['title', 'status']);
+  const glpiDisabled = lastConfig.glpiEnabled === false;
+  const evoDisabled = lastConfig.evolutizeEnabled === false;
+  const mdDisabled = lastConfig.movideskEnabled === false;
+  const disabledMsg = 'Fonte desativada nas configurações.';
 
-  fillAvulsoStatus('glpiAvulsoStatus', state.glpiAvulsos || {}, (id) => `${GLPI_BASE}/front/ticket.form.php?id=${id}`);
-  fillAvulsoStatus('evoAvulsoStatus', state.evolutizeAvulsos || {}, null);
-  fillAvulsoStatus('mdAvulsoStatus', state.movideskAvulsos || {}, (id) => `${MOVIDESK_BASE}/Ticket/Edit/${id}`);
+  fillTable('tableGlpi', 'countGlpi', state.glpi || {}, (id) => `${GLPI_BASE}/front/ticket.form.php?id=${id}`, ['title', 'status', 'requester', 'lastUpdate', 'lastUpdateBy'], tableFilters.glpi, glpiDisabled ? disabledMsg : null);
+  fillTable('tableEvo', 'countEvo', state.evolutize || {}, null, ['title', 'status', 'lastUpdate'], tableFilters.evo, evoDisabled ? disabledMsg : null);
+  fillTable('tableMd', 'countMd', state.movidesk || {}, (id) => `${MOVIDESK_BASE}/Ticket/Edit/${id}`, ['title', 'status'], null, mdDisabled ? disabledMsg : null);
+
+  fillAvulsoStatus('glpiAvulsoStatus', state.glpiAvulsos || {}, (id) => `${GLPI_BASE}/front/ticket.form.php?id=${id}`, glpiDisabled, (lastConfig.glpiAvulsos || []).length);
+  fillAvulsoStatus('evoAvulsoStatus', state.evolutizeAvulsos || {}, null, evoDisabled, (lastConfig.evolutizeAvulsos || []).length);
+  fillAvulsoStatus('mdAvulsoStatus', state.movideskAvulsos || {}, (id) => `${MOVIDESK_BASE}/Ticket/Edit/${id}`, mdDisabled, (lastConfig.movideskAvulsos || []).length);
 }
 
 function applyTableFilter(entries, filter) {
@@ -288,9 +319,20 @@ function applyTableFilter(entries, filter) {
   return out;
 }
 
-function fillTable(tableId, countId, map, linkFn, fields, filter) {
+function fillTable(tableId, countId, map, linkFn, fields, filter, disabledMessage) {
   const tbody = document.querySelector(`#${tableId} tbody`);
   tbody.innerHTML = '';
+  if (disabledMessage) {
+    el(countId).textContent = '';
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = fields.length + 1;
+    td.className = 'muted';
+    td.textContent = disabledMessage;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
   const allEntries = Object.entries(map);
   const entries = applyTableFilter(allEntries, filter);
   if (!allEntries.length) {
@@ -346,9 +388,15 @@ function fillTable(tableId, countId, map, linkFn, fields, filter) {
   });
 }
 
-function fillAvulsoStatus(listId, map, linkFn) {
+function fillAvulsoStatus(listId, map, linkFn, disabled, configuredCount) {
   const ul = el(listId);
   ul.innerHTML = '';
+  if (disabled) {
+    ul.innerHTML = configuredCount
+      ? `<li class="muted">Fonte desativada nas configurações — ${configuredCount} avulso(s) configurado(s), mas não verificado(s) agora.</li>`
+      : '<li class="muted">Fonte desativada nas configurações.</li>';
+    return;
+  }
   const entries = Object.entries(map);
   if (!entries.length) {
     ul.innerHTML = '<li class="muted">Nenhum chamado avulso configurado.</li>';
@@ -447,6 +495,76 @@ function renderEvents(events) {
   el('historyCount').textContent = history.length ? `(${history.length})` : '';
 }
 
+// ---------- manutenção de dados ----------
+
+function renderMaintenanceStats(events, ticketHistory) {
+  const list = events || [];
+  const pending = list.filter((e) => !e.acknowledged).length;
+  let oldestTs = null;
+  for (const e of list) {
+    if (oldestTs == null || e.ts < oldestTs) oldestTs = e.ts;
+  }
+  const oldestTxt = oldestTs ? `a mais antiga é de ${fmtEventTime(oldestTs)}` : 'nenhuma registrada ainda';
+
+  const map = ticketHistory || {};
+  let thTotal = 0;
+  let thTickets = 0;
+  for (const l of Object.values(map)) {
+    if (Array.isArray(l) && l.length) {
+      thTotal += l.length;
+      thTickets += 1;
+    }
+  }
+
+  el('maintenanceStats').textContent =
+    `Atualizações/Histórico: ${list.length} registro(s) (${pending} pendente(s)) — ${oldestTxt}. ` +
+    `Histórico por chamado: ${thTotal} registro(s) em ${thTickets} chamado(s).`;
+}
+
+function showMaintenanceStatus(message) {
+  const p = el('maintenanceStatus');
+  p.textContent = message;
+  p.classList.remove('hidden');
+  setTimeout(() => p.classList.add('hidden'), 5000);
+}
+
+// Confirmação em duas etapas: primeiro clique só avisa e vira "confirmar" por alguns
+// segundos; segundo clique dentro desse prazo executa de verdade. Passado o prazo sem
+// confirmar, volta ao estado normal sem fazer nada — evita apagar histórico sem querer.
+function wireConfirmButton(btn, confirmLabel, onConfirm) {
+  const original = btn.textContent;
+  let timer = null;
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('confirming')) {
+      clearTimeout(timer);
+      btn.classList.remove('confirming');
+      btn.textContent = original;
+      onConfirm();
+    } else {
+      btn.classList.add('confirming');
+      btn.textContent = confirmLabel;
+      timer = setTimeout(() => {
+        btn.classList.remove('confirming');
+        btn.textContent = original;
+      }, 4000);
+    }
+  });
+}
+
+wireConfirmButton(el('btnClearEvents'), 'Confirma? (clique de novo)', async () => {
+  const days = Math.max(0, Number(el('clearEventsDays').value) || 0);
+  const res = await chrome.runtime.sendMessage({ type: 'clearEvents', olderThanDays: days });
+  showMaintenanceStatus(`Atualizações/Histórico: ${res.removed} registro(s) removido(s), ${res.remaining} restante(s).`);
+  loadAll();
+});
+
+wireConfirmButton(el('btnClearTicketHistory'), 'Confirma? (clique de novo)', async () => {
+  const days = Math.max(0, Number(el('clearTicketHistoryDays').value) || 0);
+  const res = await chrome.runtime.sendMessage({ type: 'clearTicketHistory', olderThanDays: days });
+  showMaintenanceStatus(`Histórico por chamado: ${res.removed} registro(s) removido(s), ${res.remaining} restante(s).`);
+  loadAll();
+});
+
 async function acknowledgeEvent(eventId) {
   await chrome.runtime.sendMessage({ type: 'acknowledgeEvent', eventId });
   loadAll();
@@ -534,6 +652,9 @@ el('btnSaveConfig').addEventListener('click', async () => {
   config.glpiOnlyAvulsos = el('glpiOnlyAvulsos').checked;
   config.evolutizeOnlyAvulsos = el('evolutizeOnlyAvulsos').checked;
   config.movideskOnlyAvulsos = el('movideskOnlyAvulsos').checked;
+  config.glpiEnabled = el('glpiEnabled').checked;
+  config.evolutizeEnabled = el('evolutizeEnabled').checked;
+  config.movideskEnabled = el('movideskEnabled').checked;
   const staleRaw = el('staleDays').value.trim();
   let staleDays = staleRaw === '' ? 0 : Number(staleRaw);
   if (!Number.isFinite(staleDays) || staleDays < 0) staleDays = 0;
@@ -551,6 +672,7 @@ el('btnSaveConfig').addEventListener('click', async () => {
 
 const CONFIG_FIELDS = [
   'intervalMinutes', 'soundEnabled', 'glpiSearchUrl',
+  'glpiEnabled', 'evolutizeEnabled', 'movideskEnabled',
   'glpiAvulsos', 'glpiOnlyAvulsos', 'glpiAvulsoStaleDays',
   'evolutizeAvulsos', 'evolutizeOnlyAvulsos', 'evolutizeAvulsoUrls', 'evolutizeAvulsoStaleDays',
   'movideskAvulsos', 'movideskOnlyAvulsos', 'movideskAvulsoStaleDays',
@@ -606,6 +728,9 @@ function sanitizeImportedConfig(incoming) {
     intervalMinutes: asNumber(incoming.intervalMinutes),
     soundEnabled: asBoolean(incoming.soundEnabled),
     glpiSearchUrl: asString(incoming.glpiSearchUrl),
+    glpiEnabled: asBoolean(incoming.glpiEnabled),
+    evolutizeEnabled: asBoolean(incoming.evolutizeEnabled),
+    movideskEnabled: asBoolean(incoming.movideskEnabled),
     glpiAvulsos: asArrayOfStrings(incoming.glpiAvulsos),
     glpiOnlyAvulsos: asBoolean(incoming.glpiOnlyAvulsos),
     glpiAvulsoStaleDays: asPlainObject(incoming.glpiAvulsoStaleDays),

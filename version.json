@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0",
-  "notes": "Tema claro/escuro, nova página de métricas (BI com tendências, atividade e rankings), histórico diário pra gráficos, e correção do falso positivo \"Conteúdo do chamado mudou\" nos avulsos do GLPI/Movidesk.",
+  "version": "1.3.0",
+  "notes": "Card de manutenção de dados (limpar Atualizações/Histórico e histórico por chamado, por idade e com confirmação em duas etapas) e checkbox pra desligar uma fonte inteira (GLPI/Evolutize/Movidesk) — útil pra quem não tem acesso a alguma delas.",
   "url": "https://github.com/batistela/hub-chamados"
 }

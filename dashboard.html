@@ -46,8 +46,12 @@
       </div>
 
       <div class="avulsos-grid">
-        <div>
-          <h3>Chamados avulsos — GLPI</h3>
+        <div id="glpiAvulsoConfig">
+          <h3>GLPI</h3>
+          <label class="checkbox-row small source-enable-row">
+            <input type="checkbox" id="glpiEnabled" />
+            Verificar esta fonte <span id="glpiDisabledBadge" class="disabled-badge hidden">desativada</span>
+          </label>
           <p class="muted small">Números de chamados que você acompanha fora do filtro principal (ex: repassados sem constar como observador).</p>
           <label class="checkbox-row small">
             <input type="checkbox" id="glpiOnlyAvulsos" />
@@ -59,8 +63,12 @@
           </div>
           <ul id="glpiAvulsoList" class="avulso-list"></ul>
         </div>
-        <div>
-          <h3>Chamados avulsos — Evolutize</h3>
+        <div id="evoAvulsoConfig">
+          <h3>Evolutize</h3>
+          <label class="checkbox-row small source-enable-row">
+            <input type="checkbox" id="evolutizeEnabled" />
+            Verificar esta fonte <span id="evoDisabledBadge" class="disabled-badge hidden">desativada</span>
+          </label>
           <p class="muted small">Chamados repassados que não aparecem na sua lista, ou — se marcar a caixa abaixo — todos os que você quer acompanhar (em vez da lista completa).</p>
           <label class="checkbox-row small">
             <input type="checkbox" id="evolutizeOnlyAvulsos" />
@@ -72,9 +80,13 @@
           </div>
           <ul id="evoAvulsoList" class="avulso-list"></ul>
         </div>
-        <div>
-          <h3>Chamados avulsos — Movidesk</h3>
-          <p class="muted small">Chamados que você quer acompanhar individualmente por número, além (ou no lugar) da visualização "Teste".</p>
+        <div id="mdAvulsoConfig">
+          <h3>Movidesk</h3>
+          <label class="checkbox-row small source-enable-row">
+            <input type="checkbox" id="movideskEnabled" />
+            Verificar esta fonte <span id="mdDisabledBadge" class="disabled-badge hidden">desativada</span>
+          </label>
+          <p class="muted small">Chamados que você quer acompanhar individualmente por número, além (ou no lugar) da visualização "Teste". Desmarque a caixa acima se você não tem acesso ao Movidesk.</p>
           <label class="checkbox-row small">
             <input type="checkbox" id="movideskOnlyAvulsos" />
             Mostrar só os avulsos (não puxar a lista completa)
@@ -139,7 +151,44 @@
     </section>
 
     <section class="card">
-      <h2>GLPI <span class="count" id="countGlpi"></span></h2>
+      <h2>Manutenção de dados</h2>
+      <p class="muted small">Limpeza do que já foi guardado — não muda a lógica de checagem, só apaga histórico acumulado. Cada botão pede confirmação (clique de novo pra confirmar).</p>
+      <div class="maintenance-stats muted small" id="maintenanceStats">Carregando...</div>
+      <div class="maintenance-grid">
+        <div class="maintenance-item">
+          <div>
+            <strong>Atualizações recentes / Histórico</strong>
+            <p class="muted small">Apaga eventos de "Atualizações recentes" e "Histórico" (o que aparece na tela inicial). Não afeta o histórico por chamado, nem os dados dos gráficos de tendência.</p>
+          </div>
+          <div class="maintenance-controls">
+            <label class="muted small">
+              Mais antigo que
+              <input type="number" id="clearEventsDays" min="0" max="3650" step="1" value="0" class="maintenance-days-input" />
+              dia(s) — 0 = tudo
+            </label>
+            <button id="btnClearEvents" class="btn danger">Limpar</button>
+          </div>
+        </div>
+        <div class="maintenance-item">
+          <div>
+            <strong>Histórico por chamado</strong>
+            <p class="muted small">Apaga o histórico usado em "Consultar chamado" (mudanças guardadas por número, mesmo depois de saírem da lista principal).</p>
+          </div>
+          <div class="maintenance-controls">
+            <label class="muted small">
+              Mais antigo que
+              <input type="number" id="clearTicketHistoryDays" min="0" max="3650" step="1" value="0" class="maintenance-days-input" />
+              dia(s) — 0 = tudo
+            </label>
+            <button id="btnClearTicketHistory" class="btn danger">Limpar</button>
+          </div>
+        </div>
+      </div>
+      <p id="maintenanceStatus" class="muted small hidden"></p>
+    </section>
+
+    <section class="card" id="cardGlpi">
+      <h2>GLPI <span class="count" id="countGlpi"></span> <span id="glpiCardDisabledBadge" class="disabled-badge hidden">desativada</span></h2>
       <p id="errorGlpi" class="source-error hidden"></p>
       <div class="table-filter">
         <input type="text" id="filterGlpi" placeholder="Filtrar por ID, título, status, requerente ou editor..." />
@@ -154,8 +203,8 @@
       </table>
     </section>
 
-    <section class="card">
-      <h2>Evolutize <span class="count" id="countEvo"></span></h2>
+    <section class="card" id="cardEvo">
+      <h2>Evolutize <span class="count" id="countEvo"></span> <span id="evoCardDisabledBadge" class="disabled-badge hidden">desativada</span></h2>
       <p id="errorEvo" class="source-error hidden"></p>
       <div class="table-filter">
         <input type="text" id="filterEvo" placeholder="Filtrar por número, título ou situação..." />
@@ -170,8 +219,8 @@
       </table>
     </section>
 
-    <section class="card">
-      <h2>Movidesk (Keyrus) <span class="count" id="countMd"></span></h2>
+    <section class="card" id="cardMd">
+      <h2>Movidesk (Keyrus) <span class="count" id="countMd"></span> <span id="mdCardDisabledBadge" class="disabled-badge hidden">desativada</span></h2>
       <p id="errorMd" class="source-error hidden"></p>
       <table class="ticket-table" id="tableMd">
         <thead><tr><th>Número</th><th>Título</th><th>Status</th></tr></thead>
@@ -182,15 +231,15 @@
     <section class="card">
       <h2>Avulsos acompanhados</h2>
       <div class="avulsos-status-grid">
-        <div>
+        <div id="glpiAvulsoStatusCol">
           <h3>GLPI</h3>
           <ul id="glpiAvulsoStatus" class="avulso-status-list"></ul>
         </div>
-        <div>
+        <div id="evoAvulsoStatusCol">
           <h3>Evolutize</h3>
           <ul id="evoAvulsoStatus" class="avulso-status-list"></ul>
         </div>
-        <div>
+        <div id="mdAvulsoStatusCol">
           <h3>Movidesk</h3>
           <ul id="mdAvulsoStatus" class="avulso-status-list"></ul>
         </div>

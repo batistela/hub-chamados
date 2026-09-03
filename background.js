@@ -50,6 +50,14 @@ async function withRetries(fn, { attempts = 2, delayMs = 6000, label = '' } = {}
 
 const DEFAULT_CONFIG = {
   intervalMinutes: 15,
+  // Liga/desliga a fonte INTEIRA (lista + avulsos) — diferente de "*OnlyAvulsos", que só
+  // pula a lista mas continua checando avulsos. Default true (comportamento de sempre)
+  // pra não mudar nada de quem já usa o Hub; existe pra analistas sem acesso a uma das
+  // três fontes (ex: sem login no Movidesk), que hoje mesmo assim tinham a checagem
+  // tentando entrar lá toda vez, gerando erro de "sessão" falso e perdendo tempo à toa.
+  glpiEnabled: true,
+  evolutizeEnabled: true,
+  movideskEnabled: true,
   glpiSearchUrl: '',
   glpiAvulsos: [],
   glpiOnlyAvulsos: false,
@@ -178,6 +186,44 @@ async function acknowledgeAllEvents() {
   await chrome.storage.local.set({ events: next });
   updateBadge(0);
   return next;
+}
+
+// ---------- limpeza de histórico (com controle, a pedido do Murilo) ----------
+// Diferente de "apagar tudo de uma vez": olderThanDays > 0 remove só o que é mais velho
+// que isso (mantém o que é recente); olderThanDays <= 0 (ou ausente) apaga tudo. Os dois
+// stores (`events` = "Atualizações recentes"/"Histórico" geral, `ticketHistory` =
+// histórico por chamado) são independentes — o dashboard oferece um botão pra cada um,
+// pra dar controle separado.
+async function clearEvents(olderThanDays) {
+  const { events } = await chrome.storage.local.get('events');
+  const list = events || [];
+  let next;
+  if (olderThanDays > 0) {
+    const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+    next = list.filter((e) => e.ts >= cutoff);
+  } else {
+    next = [];
+  }
+  await chrome.storage.local.set({ events: next });
+  updateBadge(next.filter((e) => !e.acknowledged).length);
+  return { removed: list.length - next.length, remaining: next.length };
+}
+
+async function clearTicketHistory(olderThanDays) {
+  const { ticketHistory } = await chrome.storage.local.get('ticketHistory');
+  const map = ticketHistory || {};
+  const cutoff = olderThanDays > 0 ? Date.now() - olderThanDays * 24 * 60 * 60 * 1000 : null;
+  let removed = 0;
+  let remaining = 0;
+  const nextMap = {};
+  for (const [key, list] of Object.entries(map)) {
+    const filtered = cutoff ? list.filter((e) => e.ts >= cutoff) : [];
+    removed += list.length - filtered.length;
+    remaining += filtered.length;
+    if (filtered.length) nextMap[key] = filtered;
+  }
+  await chrome.storage.local.set({ ticketHistory: nextMap });
+  return { removed, remaining };
 }
 
 // ---------- alarme ----------
@@ -876,105 +922,133 @@ async function runCheck() {
     checkForUpdate().catch((e) => console.warn('checkForUpdate falhou', e));
 
     await withWorkerTab(async (tabId) => {
-      // GLPI - lista principal (pulada se "só avulsos" estiver marcado)
-      if (config.glpiOnlyAvulsos) {
+      // GLPI — fonte inteira desligada: não abre nenhuma página do GLPI, não gera erro
+      // (fonte desligada de propósito não é um problema), e zera o state (lista e
+      // avulsos) pra o Hub não continuar mostrando dados antigos como se ainda
+      // estivessem sendo acompanhados.
+      if (!config.glpiEnabled) {
         state.glpi = {};
+        state.glpiAvulsos = {};
         errors.glpi = null;
-      } else if (config.glpiSearchUrl) {
-        try {
-          const glpiList = await withRetries(() => checkGLPIList(tabId, config.glpiSearchUrl), { label: 'GLPI' });
-          // trackLastUpdate:true também liga o cruzamento de status × última tramitação
-          // (ver diffListSource) — importante pro GLPI porque a coluna "Última
-          // atualização" já vem na mesma leitura da grade.
-          const { nextMap, events } = diffListSource('GLPI', state.glpi || {}, glpiList, { trackLastUpdate: true });
-          state.glpi = nextMap;
-          allEvents.push(...events);
-          errors.glpi = glpiList.length ? null : 'A checagem rodou mas não encontrou nenhuma linha na tabela de resultados (ver detalhes no README/console).';
-        } catch (e) {
-          console.error('Falha ao checar GLPI', e);
-          errors.glpi = String(e && e.message ? e.message : e);
-        }
+        errors.glpiAvulsos = null;
       } else {
-        errors.glpi = 'Nenhuma URL de pesquisa salva configurada no Hub.';
-      }
+        // GLPI - lista principal (pulada se "só avulsos" estiver marcado)
+        if (config.glpiOnlyAvulsos) {
+          state.glpi = {};
+          errors.glpi = null;
+        } else if (config.glpiSearchUrl) {
+          try {
+            const glpiList = await withRetries(() => checkGLPIList(tabId, config.glpiSearchUrl), { label: 'GLPI' });
+            // trackLastUpdate:true também liga o cruzamento de status × última tramitação
+            // (ver diffListSource) — importante pro GLPI porque a coluna "Última
+            // atualização" já vem na mesma leitura da grade.
+            const { nextMap, events } = diffListSource('GLPI', state.glpi || {}, glpiList, { trackLastUpdate: true });
+            state.glpi = nextMap;
+            allEvents.push(...events);
+            errors.glpi = glpiList.length ? null : 'A checagem rodou mas não encontrou nenhuma linha na tabela de resultados (ver detalhes no README/console).';
+          } catch (e) {
+            console.error('Falha ao checar GLPI', e);
+            errors.glpi = String(e && e.message ? e.message : e);
+          }
+        } else {
+          errors.glpi = 'Nenhuma URL de pesquisa salva configurada no Hub.';
+        }
 
-      // GLPI - avulsos
-      if (config.glpiAvulsos.length) {
-        try {
-          const glpiAv = await checkGLPIAvulsos(tabId, config.glpiAvulsos);
-          const { resultMap: glpiAvResult, events } = diffAvulsoSource('GLPI (avulso)', state.glpiAvulsos || {}, glpiAv);
-          state.glpiAvulsos = glpiAvResult;
-          allEvents.push(...events);
-        } catch (e) {
-          console.error('Falha ao checar avulsos GLPI', e);
-          errors.glpiAvulsos = String(e && e.message ? e.message : e);
+        // GLPI - avulsos
+        if (config.glpiAvulsos.length) {
+          try {
+            const glpiAv = await checkGLPIAvulsos(tabId, config.glpiAvulsos);
+            const { resultMap: glpiAvResult, events } = diffAvulsoSource('GLPI (avulso)', state.glpiAvulsos || {}, glpiAv);
+            state.glpiAvulsos = glpiAvResult;
+            allEvents.push(...events);
+          } catch (e) {
+            console.error('Falha ao checar avulsos GLPI', e);
+            errors.glpiAvulsos = String(e && e.message ? e.message : e);
+          }
         }
       }
 
-      // Evolutize - lista principal (pulada se "só avulsos" estiver marcado)
-      if (config.evolutizeOnlyAvulsos) {
+      // Evolutize — mesma lógica de fonte inteira desligada, ver comentário acima no GLPI.
+      if (!config.evolutizeEnabled) {
         state.evolutize = {};
+        state.evolutizeAvulsos = {};
         errors.evolutize = null;
+        errors.evolutizeAvulsos = null;
       } else {
-        try {
-          const evoList = await withRetries(() => checkEvolutizeList(tabId, state.evolutize || {}), { label: 'Evolutize' });
-          const evoDiff = diffListSource('Evolutize', state.evolutize || {}, evoList, { trackLastUpdate: true });
-          state.evolutize = evoDiff.nextMap;
-          allEvents.push(...evoDiff.events);
-          errors.evolutize = evoList.length ? null : 'A checagem rodou mas não encontrou nenhuma linha na grade de resultados.';
-        } catch (e) {
-          console.error('Falha ao checar Evolutize', e);
-          errors.evolutize = String(e && e.message ? e.message : e);
+        // Evolutize - lista principal (pulada se "só avulsos" estiver marcado)
+        if (config.evolutizeOnlyAvulsos) {
+          state.evolutize = {};
+          errors.evolutize = null;
+        } else {
+          try {
+            const evoList = await withRetries(() => checkEvolutizeList(tabId, state.evolutize || {}), { label: 'Evolutize' });
+            const evoDiff = diffListSource('Evolutize', state.evolutize || {}, evoList, { trackLastUpdate: true });
+            state.evolutize = evoDiff.nextMap;
+            allEvents.push(...evoDiff.events);
+            errors.evolutize = evoList.length ? null : 'A checagem rodou mas não encontrou nenhuma linha na grade de resultados.';
+          } catch (e) {
+            console.error('Falha ao checar Evolutize', e);
+            errors.evolutize = String(e && e.message ? e.message : e);
+          }
+        }
+
+        // Evolutize - avulsos
+        if (config.evolutizeAvulsos.length) {
+          try {
+            const { results: evoAv, avulsoUrls } = await checkEvolutizeAvulsos(
+              tabId,
+              config.evolutizeAvulsos,
+              config.evolutizeAvulsoUrls
+            );
+            const { resultMap: evoAvResult, events } = diffAvulsoSource('Evolutize (avulso)', state.evolutizeAvulsos || {}, evoAv);
+            state.evolutizeAvulsos = evoAvResult;
+            allEvents.push(...events);
+            // Guarda os links fixos descobertos/confirmados nessa rodada pra próxima
+            // checagem poder pular a busca.
+            await setConfig({ evolutizeAvulsoUrls: avulsoUrls });
+          } catch (e) {
+            console.error('Falha ao checar avulsos Evolutize', e);
+            errors.evolutizeAvulsos = String(e && e.message ? e.message : e);
+          }
         }
       }
 
-      // Evolutize - avulsos
-      if (config.evolutizeAvulsos.length) {
-        try {
-          const { results: evoAv, avulsoUrls } = await checkEvolutizeAvulsos(
-            tabId,
-            config.evolutizeAvulsos,
-            config.evolutizeAvulsoUrls
-          );
-          const { resultMap: evoAvResult, events } = diffAvulsoSource('Evolutize (avulso)', state.evolutizeAvulsos || {}, evoAv);
-          state.evolutizeAvulsos = evoAvResult;
-          allEvents.push(...events);
-          // Guarda os links fixos descobertos/confirmados nessa rodada pra próxima
-          // checagem poder pular a busca.
-          await setConfig({ evolutizeAvulsoUrls: avulsoUrls });
-        } catch (e) {
-          console.error('Falha ao checar avulsos Evolutize', e);
-          errors.evolutizeAvulsos = String(e && e.message ? e.message : e);
-        }
-      }
-
-      // Movidesk - lista principal (pulada se "só avulsos" estiver marcado)
-      if (config.movideskOnlyAvulsos) {
+      // Movidesk — mesma lógica de fonte inteira desligada, ver comentário acima no GLPI.
+      // É o caso mais comum na prática: analista sem login no Movidesk.
+      if (!config.movideskEnabled) {
         state.movidesk = {};
+        state.movideskAvulsos = {};
         errors.movidesk = null;
+        errors.movideskAvulsos = null;
       } else {
-        try {
-          const mdList = await withRetries(() => checkMovidesk(tabId), { label: 'Movidesk' });
-          const mdDiff = diffListSource('Movidesk', state.movidesk || {}, mdList);
-          state.movidesk = mdDiff.nextMap;
-          allEvents.push(...mdDiff.events);
-          errors.movidesk = mdList.length ? null : 'A checagem rodou mas não encontrou nenhum card na visão "Teste".';
-        } catch (e) {
-          console.error('Falha ao checar Movidesk', e);
-          errors.movidesk = String(e && e.message ? e.message : e);
+        // Movidesk - lista principal (pulada se "só avulsos" estiver marcado)
+        if (config.movideskOnlyAvulsos) {
+          state.movidesk = {};
+          errors.movidesk = null;
+        } else {
+          try {
+            const mdList = await withRetries(() => checkMovidesk(tabId), { label: 'Movidesk' });
+            const mdDiff = diffListSource('Movidesk', state.movidesk || {}, mdList);
+            state.movidesk = mdDiff.nextMap;
+            allEvents.push(...mdDiff.events);
+            errors.movidesk = mdList.length ? null : 'A checagem rodou mas não encontrou nenhum card na visão "Teste".';
+          } catch (e) {
+            console.error('Falha ao checar Movidesk', e);
+            errors.movidesk = String(e && e.message ? e.message : e);
+          }
         }
-      }
 
-      // Movidesk - avulsos
-      if (config.movideskAvulsos.length) {
-        try {
-          const mdAv = await checkMovideskAvulsos(tabId, config.movideskAvulsos);
-          const { resultMap: mdAvResult, events } = diffAvulsoSource('Movidesk (avulso)', state.movideskAvulsos || {}, mdAv);
-          state.movideskAvulsos = mdAvResult;
-          allEvents.push(...events);
-        } catch (e) {
-          console.error('Falha ao checar avulsos Movidesk', e);
-          errors.movideskAvulsos = String(e && e.message ? e.message : e);
+        // Movidesk - avulsos
+        if (config.movideskAvulsos.length) {
+          try {
+            const mdAv = await checkMovideskAvulsos(tabId, config.movideskAvulsos);
+            const { resultMap: mdAvResult, events } = diffAvulsoSource('Movidesk (avulso)', state.movideskAvulsos || {}, mdAv);
+            state.movideskAvulsos = mdAvResult;
+            allEvents.push(...events);
+          } catch (e) {
+            console.error('Falha ao checar avulsos Movidesk', e);
+            errors.movideskAvulsos = String(e && e.message ? e.message : e);
+          }
         }
       }
     });
@@ -1046,6 +1120,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg?.type === 'acknowledgeAllEvents') {
     acknowledgeAllEvents().then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (msg?.type === 'clearEvents') {
+    clearEvents(Number(msg.olderThanDays) || 0).then((result) => sendResponse({ ok: true, ...result }));
+    return true;
+  }
+  if (msg?.type === 'clearTicketHistory') {
+    clearTicketHistory(Number(msg.olderThanDays) || 0).then((result) => sendResponse({ ok: true, ...result }));
     return true;
   }
 });
