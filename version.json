@@ -1,5 +1,5 @@
 {
-  "version": "1.8.1",
-  "notes": "\"Testar a busca\" (fontes personalizadas) agora mostra um diagnóstico quando não encontra o chamado — quantas linhas a grade tem, o cabeçalho da coluna \"Número do ticket\" reconhecido, e os primeiros valores lidos nela — pra ajudar a entender por que um chamado que está visível na tela mesmo assim não é encontrado.",
+  "version": "1.8.2",
+  "notes": "Corrige fontes personalizadas em grades que posicionam colunas visualmente via CSS (ex.: listas modernas do SharePoint, como 'Demandas'): antes, a extração podia ler a coluna errada em algumas linhas porque a ordem das células no DOM não bate com a ordem visual — agora, quando o site fornece um identificador estável por coluna (data-automationid), ele é usado em vez da posição. IMPORTANTE: se você usa uma fonte assim, precisa reabrir 'Remapear campos' e clicar em 'Selecionar' de novo em cada campo (principalmente o 'Número do ticket') pra esse identificador ser capturado — o mapeamento salvo antes dessa versão não tem ele.",
   "url": "https://github.com/batistela/hub-chamados"
 }

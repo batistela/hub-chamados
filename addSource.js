@@ -427,8 +427,15 @@ function injectPicker(fieldKey) {
     const headerText = headerCell ? (headerCell.innerText || headerCell.textContent || '').trim() : '';
     const preview = (cell.innerText || cell.textContent || '').replace(/\s+/g, ' ').trim();
     const tableSelector = buildSelector(grid);
+    // Alguns sites (ex.: listas modernas do SharePoint) posicionam as células visualmente via
+    // CSS Grid (grid-column: calc(...)), o que pode deixar a ordem visual/lógica de uma coluna
+    // desalinhada da ordem em que ela aparece no DOM — em linhas diferentes, o mesmo índice pode
+    // corresponder a colunas diferentes. Quando a célula tem um data-automationid estável (como
+    // o SharePoint usa), guardamos ele como um identificador de coluna mais confiável que o
+    // índice puro, e extractCustomListRows tenta usá-lo primeiro antes de cair pro índice.
+    const columnKey = cell.getAttribute('data-automationid') || '';
     cleanup();
-    chrome.runtime.sendMessage({ type: 'hubFieldPicked', field: fieldKey, tableSelector, columnIndex, headerText, preview });
+    chrome.runtime.sendMessage({ type: 'hubFieldPicked', field: fieldKey, tableSelector, columnIndex, columnKey, headerText, preview });
   }
 
   function onKeydown(e) {
@@ -453,7 +460,13 @@ function injectPicker(fieldKey) {
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === 'hubFieldPicked') {
-    const sel = { tableSelector: msg.tableSelector, columnIndex: msg.columnIndex, headerText: msg.headerText, preview: msg.preview };
+    const sel = {
+      tableSelector: msg.tableSelector,
+      columnIndex: msg.columnIndex,
+      columnKey: msg.columnKey || '',
+      headerText: msg.headerText,
+      preview: msg.preview,
+    };
     let fieldLabel = msg.field;
     if (msg.field === '__number__') {
       numberField = sel;
@@ -491,7 +504,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 function buildColumns() {
   const columns = { fields: [] };
   if (numberField && numberField.tableSelector) {
-    columns.number = { tableSelector: numberField.tableSelector, columnIndex: numberField.columnIndex, headerText: numberField.headerText };
+    columns.number = {
+      tableSelector: numberField.tableSelector,
+      columnIndex: numberField.columnIndex,
+      columnKey: numberField.columnKey || '',
+      headerText: numberField.headerText,
+    };
   }
   columns.fields = fields
     .filter((f) => f.tableSelector)
@@ -501,6 +519,7 @@ function buildColumns() {
       role: f.role || 'info',
       tableSelector: f.tableSelector,
       columnIndex: f.columnIndex,
+      columnKey: f.columnKey || '',
       headerText: f.headerText,
     }));
   return columns;

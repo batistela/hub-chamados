@@ -946,7 +946,16 @@ function sanitizeImportedConfig(incoming) {
   const VALID_FIELD_ROLES = ['status', 'lastUpdate', 'lastUpdateBy', 'info'];
   const asColumnInfo = (v) =>
     v && typeof v === 'object' && !Array.isArray(v) && typeof v.tableSelector === 'string' && Number.isFinite(Number(v.columnIndex))
-      ? { tableSelector: v.tableSelector, columnIndex: Number(v.columnIndex), headerText: typeof v.headerText === 'string' ? v.headerText : '' }
+      ? {
+          tableSelector: v.tableSelector,
+          columnIndex: Number(v.columnIndex),
+          // data-automationid (ou equivalente) da coluna, quando o site fornece um — usado como
+          // identificador de coluna mais confiável que o índice em grades que posicionam células
+          // via CSS Grid (ex.: listas modernas do SharePoint), onde o índice no DOM pode não bater
+          // com a posição visual/lógica da coluna em todas as linhas.
+          columnKey: typeof v.columnKey === 'string' ? v.columnKey : '',
+          headerText: typeof v.headerText === 'string' ? v.headerText : '',
+        }
       : undefined;
   const asFieldInfo = (f) => {
     const col = asColumnInfo(f);

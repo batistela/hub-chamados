@@ -576,7 +576,8 @@ export async function extractCustomListRows(columns, numbers) {
   // Prefere casar por TEXTO do cabeçalho salvo (mais resistente a mudança de layout do
   // que um índice fixo — colunas às vezes são reordenadas ou uma nova é inserida no
   // meio); só cai pro índice salvo se não achar por texto (cabeçalho mudou de nome, ou
-  // não tem uma linha de cabeçalho clara nessa grade).
+  // não tem uma linha de cabeçalho clara nessa grade). Usado só como ÍNDICE DE
+  // REFERÊNCIA (pra achar o cabeçalho, e como último recurso — ver resolveCell abaixo).
   function resolveIndex(colInfo) {
     if (!colInfo) return -1;
     if (colInfo.headerText) {
@@ -586,24 +587,45 @@ export async function extractCustomListRows(columns, numbers) {
     return typeof colInfo.columnIndex === 'number' ? colInfo.columnIndex : -1;
   }
 
+  // IMPORTANTE (descoberto testando com SharePoint de verdade): algumas grades modernas
+  // (o "htmlGrid" do SharePoint, por exemplo) posicionam as células visualmente via CSS
+  // Grid (`grid-column: calc(N + ...)`), NÃO pela ordem em que elas aparecem no DOM — ou
+  // seja, o ÍNDICE de uma célula dentro de `cellsOf(row)` pode não representar a mesma
+  // coluna visual em linhas diferentes (ou entre a linha de cabeçalho e as linhas de
+  // dado). Isso quebra silenciosamente a extração por índice: os campos ficavam com o
+  // valor da coluna ERRADA em vez de vazio, e por isso o número procurado nunca batia.
+  // Esses gridcells do SharePoint carregam `data-automationid="field-<id>"` — um
+  // identificador de coluna ESTÁVEL, igual em toda linha, independente da posição no DOM.
+  // `columnKey` (capturado pelo assistente no clique — ver injectPicker, em
+  // addSource.js) guarda esse valor quando existe; resolveCell tenta casar por ele
+  // PRIMEIRO, e só cai pro índice posicional (resolveIndex acima) se a célula não tiver
+  // esse atributo (grades sem esse problema — GLPI, Evolutize, a maioria dos sites).
+  function resolveCell(row, colInfo, idx) {
+    const cells = cellsOf(row);
+    if (colInfo && colInfo.columnKey) {
+      const byKey = cells.find((c) => c.getAttribute('data-automationid') === colInfo.columnKey);
+      if (byKey) return byKey;
+    }
+    return idx != null && idx >= 0 ? cells[idx] : null;
+  }
+  function cellTextFor(row, colInfo, idx) {
+    const cell = resolveCell(row, colInfo, idx);
+    if (!cell) return '';
+    return (cell.innerText || cell.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
   const numberIdx = resolveIndex(numberCol);
-  if (numberIdx < 0) return { pageError: 'sem-tabela' };
+  if (numberIdx < 0 && !(numberCol && numberCol.columnKey)) return { pageError: 'sem-tabela' };
   // Índice resolvido por CAMPO (não por nome fixo) — `fields` é uma lista livre definida
   // pelo usuário no assistente, cada item já sabendo sua própria `key` (gerada uma vez,
   // nunca muda) e opcionalmente um `role` (que essa função nem olha — quem decide o que
   // fazer com cada papel é checkCustomAvulsos, em background.js).
-  const resolvedFields = fieldList.map((f) => ({ key: f.key, idx: resolveIndex(f) }));
+  const resolvedFields = fieldList.map((f) => ({ key: f.key, colInfo: f, idx: resolveIndex(f) }));
 
   const bodyRows = allRows.slice(1);
 
-  function cellText(row, i) {
-    const cells = cellsOf(row);
-    if (i == null || i < 0 || !cells[i]) return '';
-    return (cells[i].innerText || cells[i].textContent || '').replace(/\s+/g, ' ').trim();
-  }
   function rowLink(row) {
-    const cells = cellsOf(row);
-    const numCell = cells[numberIdx];
+    const numCell = resolveCell(row, numberCol, numberIdx);
     const a = (numCell && numCell.querySelector('a[href]')) || row.querySelector('a[href]');
     return a ? new URL(a.getAttribute('href'), document.baseURI).toString() : '';
   }
@@ -612,7 +634,7 @@ export async function extractCustomListRows(columns, numbers) {
   const stillWanted = new Set(wanted);
   for (const row of bodyRows) {
     if (!stillWanted.size) break;
-    const numTxt = cellText(row, numberIdx);
+    const numTxt = cellTextFor(row, numberCol, numberIdx);
     if (!numTxt) continue;
     // Casa por igualdade exata primeiro (mais seguro); senão por "contém" — números de
     // chamado às vezes vêm com prefixo/sufixo na grade (ex: "#12345", "12345 (e-mail)").
@@ -625,7 +647,7 @@ export async function extractCustomListRows(columns, numbers) {
     }
     if (!matched) continue;
     const fieldsOut = {};
-    for (const rf of resolvedFields) fieldsOut[rf.key] = cellText(row, rf.idx);
+    for (const rf of resolvedFields) fieldsOut[rf.key] = cellTextFor(row, rf.colInfo, rf.idx);
     out[matched] = { number: numTxt, fields: fieldsOut, url: rowLink(row), notFound: false };
     stillWanted.delete(matched);
   }
@@ -641,7 +663,8 @@ export async function extractCustomListRows(columns, numbers) {
     gridInfo: `${grid.tagName.toLowerCase()}${grid.id ? '#' + grid.id : ''}${grid.getAttribute('role') ? `[role="${grid.getAttribute('role')}"]` : ''}`,
     totalBodyRows: bodyRows.length,
     numberColumnHeaderText: headerCells[numberIdx] || '',
-    numberColumnSample: bodyRows.slice(0, 25).map((row) => cellText(row, numberIdx)),
+    numberColumnKey: (numberCol && numberCol.columnKey) || '',
+    numberColumnSample: bodyRows.slice(0, 25).map((row) => cellTextFor(row, numberCol, numberIdx)),
   };
   return out;
 }
