@@ -849,21 +849,34 @@ function checkStaleTickets(config, state) {
   const nextAlerted = {};
   const events = [];
 
-  const sources = [
-    { key: 'glpi', label: 'GLPI', map: state.glpi || {}, avulso: false },
-    { key: 'glpi', label: 'GLPI (avulso)', map: state.glpiAvulsos || {}, avulso: true, overrides: config.glpiAvulsoStaleDays },
-    { key: 'evolutize', label: 'Evolutize', map: state.evolutize || {}, avulso: false },
-    { key: 'evolutize', label: 'Evolutize (avulso)', map: state.evolutizeAvulsos || {}, avulso: true, overrides: config.evolutizeAvulsoStaleDays },
-    { key: 'movidesk', label: 'Movidesk', map: state.movidesk || {}, avulso: false },
-    { key: 'movidesk', label: 'Movidesk (avulso)', map: state.movideskAvulsos || {}, avulso: true, overrides: config.movideskAvulsoStaleDays },
-  ];
+  // Fonte desligada ("Verificar esta fonte" desmarcado) não entra aqui — desde v1.10.1 o
+  // state dela NÃO é mais zerado ao desligar (ver comentário em runCheck, bug relatado
+  // pelo Murilo: desligar temporariamente pra testar outra fonte apagava os chamados já
+  // registrados), então sem esse filtro os dados antigos ficariam parados sem tramitação
+  // nova pra sempre e, mais cedo ou mais tarde, disparariam aviso de "chamado parado"
+  // pra uma fonte que o usuário desligou de propósito.
+  const sources = [];
+  if (config.glpiEnabled !== false) {
+    sources.push({ key: 'glpi', label: 'GLPI', map: state.glpi || {}, avulso: false });
+    sources.push({ key: 'glpi', label: 'GLPI (avulso)', map: state.glpiAvulsos || {}, avulso: true, overrides: config.glpiAvulsoStaleDays });
+  }
+  if (config.evolutizeEnabled !== false) {
+    sources.push({ key: 'evolutize', label: 'Evolutize', map: state.evolutize || {}, avulso: false });
+    sources.push({ key: 'evolutize', label: 'Evolutize (avulso)', map: state.evolutizeAvulsos || {}, avulso: true, overrides: config.evolutizeAvulsoStaleDays });
+  }
+  if (config.movideskEnabled !== false) {
+    sources.push({ key: 'movidesk', label: 'Movidesk', map: state.movidesk || {}, avulso: false });
+    sources.push({ key: 'movidesk', label: 'Movidesk (avulso)', map: state.movideskAvulsos || {}, avulso: true, overrides: config.movideskAvulsoStaleDays });
+  }
 
-  // Fontes personalizadas — entram no mesmo formato das fixas acima: uma entrada
-  // "sem sufixo" (avulso:false, sem overrides) pro modo lista quando ligado — igual
+  // Fontes personalizadas — mesmo formato das fixas acima: uma entrada "sem sufixo"
+  // (avulso:false, sem overrides) pro modo lista quando ligado — igual
   // state.glpi/evolutize/movidesk — e uma entrada "(avulso)" pros números acompanhados
-  // individualmente, sempre que houver.
+  // individualmente, sempre que houver. Fonte desativada não entra, pelo mesmo motivo
+  // das fixas acima (o state dela também não é zerado ao desligar).
   for (const source of config.customSources || []) {
     if (!source || !source.id) continue;
+    if (source.enabled === false) continue;
     if (source.listMode) {
       sources.push({
         key: `custom:${source.id}:lista`,
@@ -1127,12 +1140,18 @@ async function runCheck() {
 
     await withWorkerTab(async (tabId) => {
       // GLPI — fonte inteira desligada: não abre nenhuma página do GLPI, não gera erro
-      // (fonte desligada de propósito não é um problema), e zera o state (lista e
-      // avulsos) pra o Hub não continuar mostrando dados antigos como se ainda
-      // estivessem sendo acompanhados.
+      // (fonte desligada de propósito não é um problema), e NÃO mexe no state — antes
+      // (até v1.10.0) zerava `state.glpi`/`state.glpiAvulsos` aqui, com a intenção de não
+      // deixar o Hub mostrar dados antigos como se ainda estivessem sendo acompanhados,
+      // mas isso já é garantido do jeito certo pelo dashboard.js (troca a tabela/lista
+      // inteira pela mensagem "Fonte desativada nas configurações" sempre que
+      // `glpiEnabled` é false, não importa o que tenha em `state`) — zerar aqui só
+      // destruía dados de verdade à toa. Bug relatado pelo Murilo em 04/09/2026: desligou
+      // GLPI/Evolutize/Movidesk temporariamente pra testar só o SharePoint, e todos os
+      // chamados que já estavam registrados sumiram (voltaram só depois de religar e
+      // rodar uma checagem nova, que buscou tudo de novo do zero). Religar a fonte agora
+      // mostra instantaneamente os últimos dados conhecidos, sem esperar uma checagem.
       if (!config.glpiEnabled) {
-        state.glpi = {};
-        state.glpiAvulsos = {};
         errors.glpi = null;
         errors.glpiAvulsos = null;
       } else {
@@ -1172,10 +1191,9 @@ async function runCheck() {
         }
       }
 
-      // Evolutize — mesma lógica de fonte inteira desligada, ver comentário acima no GLPI.
+      // Evolutize — mesma lógica de fonte inteira desligada, ver comentário acima no GLPI
+      // (não zera mais o state desde v1.10.1).
       if (!config.evolutizeEnabled) {
-        state.evolutize = {};
-        state.evolutizeAvulsos = {};
         errors.evolutize = null;
         errors.evolutizeAvulsos = null;
       } else {
@@ -1217,11 +1235,10 @@ async function runCheck() {
         }
       }
 
-      // Movidesk — mesma lógica de fonte inteira desligada, ver comentário acima no GLPI.
-      // É o caso mais comum na prática: analista sem login no Movidesk.
+      // Movidesk — mesma lógica de fonte inteira desligada, ver comentário acima no GLPI
+      // (não zera mais o state desde v1.10.1). É o caso mais comum na prática: analista
+      // sem login no Movidesk.
       if (!config.movideskEnabled) {
-        state.movidesk = {};
-        state.movideskAvulsos = {};
         errors.movidesk = null;
         errors.movideskAvulsos = null;
       } else {

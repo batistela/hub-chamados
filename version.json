@@ -1,5 +1,5 @@
 {
-  "version": "1.10.0",
-  "notes": "Página estava ficando muito longa: agora cada fonte personalizada pode ser minimizada (clique no título — sobra só nome, modo, colunas mapeadas e nº de avulsos) e as seções de fontes personalizadas foram todas pra depois de 'Avulsos acompanhados', no fim da página, já que GLPI/Evolutize/Movidesk são as fontes principais e atualizam bem mais rápido. Também corrigido: na tela de Métricas, a linha de tendência (sparkline) dos cartões de KPI passava do limite visual do bloco em telas mais estreitas.",
+  "version": "1.10.1",
+  "notes": "Duas correções de bug: (1) remover um chamado avulso (de qualquer fonte, incluindo personalizadas) agora tira ele da tela de 'Avulsos acompanhados' na hora — antes ficava aparecendo até a próxima verificação automática rodar. (2) desmarcar 'Verificar esta fonte' no GLPI/Evolutize/Movidesk não apaga mais os chamados já registrados — antes zerava tudo na hora de desativar, e só voltava depois de reativar e rodar uma verificação nova; agora só pausa a checagem, mantendo os últimos dados conhecidos.",
   "url": "https://github.com/batistela/hub-chamados"
 }

@@ -274,6 +274,32 @@ async function currentConfig() {
   return config || {};
 }
 
+// Remove imediatamente o registro salvo desse avulso do `state` (não só do `config`) —
+// senão o Hub continua mostrando o chamado em "Avulsos acompanhados" com os dados da
+// última checagem até a checagem automática seguinte rodar e perceber sozinha que ele
+// saiu da lista (bug relatado pelo Murilo em 04/09/2026: removia um avulso — inclusive de
+// fonte personalizada — e ele continuava aparecendo no status normalmente, às vezes por
+// vários minutos, até a próxima verificação substituir `state` inteiro). `stateKey` é a
+// chave de topo em `state` (ex: 'glpiAvulsos', 'evolutizeAvulsos', 'movideskAvulsos'); pra
+// fontes personalizadas, use pruneCustomAvulsoFromState (o mapa fica um nível mais fundo,
+// por `source.id`).
+async function pruneAvulsoFromState(stateKey, num) {
+  const { state } = await chrome.storage.local.get('state');
+  if (state && state[stateKey] && Object.prototype.hasOwnProperty.call(state[stateKey], num)) {
+    delete state[stateKey][num];
+    await chrome.storage.local.set({ state });
+  }
+}
+
+async function pruneCustomAvulsoFromState(sourceId, num) {
+  const { state } = await chrome.storage.local.get('state');
+  const map = state && state.customAvulsos && state.customAvulsos[sourceId];
+  if (map && Object.prototype.hasOwnProperty.call(map, num)) {
+    delete map[num];
+    await chrome.storage.local.set({ state });
+  }
+}
+
 // Lê o valor digitado no campo de dias por avulso e salva no mapa de overrides
 // correspondente — vazio ou 0 remove o override (volta a usar o padrão geral).
 function applyStaleOverride(map, num, value) {
@@ -289,6 +315,7 @@ async function removeGlpiAvulso(num) {
   config.glpiAvulsos = (config.glpiAvulsos || []).filter((n) => n !== num);
   if (config.glpiAvulsoStaleDays) delete config.glpiAvulsoStaleDays[num];
   await chrome.storage.local.set({ config });
+  await pruneAvulsoFromState('glpiAvulsos', num);
   loadAll();
 }
 
@@ -298,6 +325,7 @@ async function removeEvoAvulso(num) {
   if (config.evolutizeAvulsoUrls) delete config.evolutizeAvulsoUrls[num];
   if (config.evolutizeAvulsoStaleDays) delete config.evolutizeAvulsoStaleDays[num];
   await chrome.storage.local.set({ config });
+  await pruneAvulsoFromState('evolutizeAvulsos', num);
   loadAll();
 }
 
@@ -306,6 +334,7 @@ async function removeMdAvulso(num) {
   config.movideskAvulsos = (config.movideskAvulsos || []).filter((n) => n !== num);
   if (config.movideskAvulsoStaleDays) delete config.movideskAvulsoStaleDays[num];
   await chrome.storage.local.set({ config });
+  await pruneAvulsoFromState('movideskAvulsos', num);
   loadAll();
 }
 
@@ -452,11 +481,14 @@ function renderCustomSources(config) {
       ul,
       source.avulsos || [],
       source.avulsoStaleDays || {},
-      (num) => updateCustomSource(source.id, (s) => {
-        s.avulsos = (s.avulsos || []).filter((n) => n !== num);
-        if (s.avulsoStaleDays) delete s.avulsoStaleDays[num];
-        if (s.avulsoUrls) delete s.avulsoUrls[num];
-      }),
+      (num) => {
+        updateCustomSource(source.id, (s) => {
+          s.avulsos = (s.avulsos || []).filter((n) => n !== num);
+          if (s.avulsoStaleDays) delete s.avulsoStaleDays[num];
+          if (s.avulsoUrls) delete s.avulsoUrls[num];
+        });
+        pruneCustomAvulsoFromState(source.id, num);
+      },
       (num, value) => updateCustomSource(source.id, (s) => {
         s.avulsoStaleDays = applyStaleOverride(s.avulsoStaleDays, num, value);
       })
