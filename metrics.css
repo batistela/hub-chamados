@@ -122,6 +122,12 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* Rede de segurança: o conteúdo de .kpi-meta abaixo agora quebra linha (flex-wrap) em
+     vez de estourar a largura do card, mas isso continua aqui pra garantir que nada
+     (linha do gráfico, texto bem longo) escape visualmente por cima da borda arredondada
+     em nenhum cenário — ver observação do Murilo de 03/09/2026 (linha do sparkline
+     passando do limite do bloco). */
+  overflow: hidden;
 }
 .kpi-label {
   display: flex;
@@ -132,12 +138,16 @@
 }
 .kpi-label .chip-dot { width: 8px; height: 8px; border-radius: 50%; }
 .kpi-value { font-size: 28px; font-weight: 600; line-height: 1; }
-.kpi-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.kpi-delta { font-size: 12px; white-space: nowrap; }
+/* Quebra linha (flex-wrap) porque texto do delta ("▼ 7 — últimos 2 dias") + os 84px do
+   sparkline não cabem lado a lado num kpi-tile estreito (a grade permite até 180px de
+   largura) — antes disso a linha do gráfico ficava saindo por cima da borda do card. Com
+   wrap, o sparkline só desce pra própria linha quando não há espaço, sem cortar nada. */
+.kpi-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px 10px; flex-wrap: wrap; }
+.kpi-delta { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .kpi-delta.up-bad, .kpi-delta.down-bad { color: var(--status-critical); }
 .kpi-delta.up-good, .kpi-delta.down-good { color: var(--status-good); }
 .kpi-delta.flat { color: var(--muted); }
-.kpi-sparkline { width: 84px; height: 26px; display: block; flex-shrink: 0; }
+.kpi-sparkline { width: 84px; height: 26px; display: block; flex-shrink: 0; margin-left: auto; }
 
 /* ---------- gráficos de linha ---------- */
 

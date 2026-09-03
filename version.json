@@ -1,5 +1,5 @@
 {
-  "version": "1.9.0",
-  "notes": "Fontes personalizadas ganham 'modo lista': ligue 'Rastrear automaticamente' numa fonte e ela passa a acompanhar TODO chamado que aparece na URL cadastrada, sozinha — novo chamado, mudança de status e chamado que some da lista, sem precisar informar número nenhum (funciona do mesmo jeito que GLPI/Evolutize/Movidesk). Avulsos continuam existindo, agora pensados pra chamados que NÃO aparecem nessa lista (com opção de usar uma URL separada só pra eles). Também ganhou o papel 'Título' pros campos livres, usado no rastreio automático.",
+  "version": "1.10.0",
+  "notes": "Página estava ficando muito longa: agora cada fonte personalizada pode ser minimizada (clique no título — sobra só nome, modo, colunas mapeadas e nº de avulsos) e as seções de fontes personalizadas foram todas pra depois de 'Avulsos acompanhados', no fim da página, já que GLPI/Evolutize/Movidesk são as fontes principais e atualizam bem mais rápido. Também corrigido: na tela de Métricas, a linha de tendência (sparkline) dos cartões de KPI passava do limite visual do bloco em telas mais estreitas.",
   "url": "https://github.com/batistela/hub-chamados"
 }

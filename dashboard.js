@@ -63,6 +63,23 @@ async function applyStoredTheme() {
 }
 applyStoredTheme();
 
+// ---------- fontes personalizadas: blocos minimizados/expandidos ----------
+// Qual bloco de fonte personalizada está minimizado é preferência pessoal de exibição
+// (a página ficou longa com muitos desenvolvimentos — pedido do Murilo em 03/09/2026),
+// não configuração operacional — por isso fica numa chave própria do storage, igual o
+// tema, fora do exportar/importar configurações. Guardado como array de `source.id`;
+// mantido também em memória (Set) pra renderCustomSources não precisar ser assíncrona.
+let collapsedCustomSourceIds = new Set();
+async function loadCollapsedCustomSources() {
+  const { uiCollapsedCustomSources } = await chrome.storage.local.get('uiCollapsedCustomSources');
+  collapsedCustomSourceIds = new Set(uiCollapsedCustomSources || []);
+}
+function setCustomSourceCollapsed(id, collapsed) {
+  if (collapsed) collapsedCustomSourceIds.add(id);
+  else collapsedCustomSourceIds.delete(id);
+  chrome.storage.local.set({ uiCollapsedCustomSources: [...collapsedCustomSourceIds] });
+}
+
 function fmtTime(ts) {
   if (!ts) return 'Nunca verificado';
   const d = new Date(ts);
@@ -385,34 +402,50 @@ function renderCustomSources(config) {
   container.innerHTML = '';
   sources.forEach((source) => {
     const columnCount = countMappedColumns(source.columns);
-    const block = document.createElement('div');
+    const avulsoCount = (source.avulsos || []).length;
+    // <details>/<summary> nativo: dá o clique-pra-minimizar sem precisar de JS pra abrir/
+    // fechar, e o estado (aberto/fechado) é lido/gravado em collapsedCustomSourceIds, que
+    // sobrevive a re-renders (o container inteiro é refeito a cada mudança de storage).
+    const block = document.createElement('details');
     block.className = 'custom-source-block';
+    block.open = !collapsedCustomSourceIds.has(source.id);
+    const modeBadge = source.listMode ? 'rastreio automático' : 'só avulsos';
+    const disabledBadge = source.enabled === false ? '<span class="disabled-badge">desativada</span>' : '';
     block.innerHTML = `
-      <h3>${escapeHtml(source.label)}</h3>
-      <label class="checkbox-row small source-enable-row">
-        <input type="checkbox" class="cs-enabled" ${source.enabled !== false ? 'checked' : ''} />
-        Verificar esta fonte
-      </label>
-      <label class="checkbox-row small source-listmode-row">
-        <input type="checkbox" class="cs-listmode" ${source.listMode ? 'checked' : ''} />
-        Rastrear automaticamente todo chamado que aparece nessa lista (como GLPI/Evolutize/Movidesk) — sem precisar informar o número
-      </label>
-      <p class="muted small">Lista: <code>${escapeHtml(source.listUrl || '')}</code> — ${columnCount} coluna(s) mapeada(s)</p>
-      <label class="small cs-avulso-url-row">
-        URL separada só pra busca de avulsos (opcional — deixe em branco pra usar a mesma lista acima; preencha se os avulsos ficam numa tela diferente, ex: sem o filtro "atribuídos a mim")
-        <input type="text" class="cs-avulso-url" placeholder="Deixe em branco pra usar a URL da lista" value="${escapeHtml(source.avulsoListUrl || '')}" />
-      </label>
-      <div class="avulso-add">
-        <input type="text" class="cs-avulso-input" placeholder="Número do chamado, ou cole a URL dele" />
-        <button class="btn cs-add-avulso">Adicionar</button>
-      </div>
-      <p class="muted small">Avulsos (chamados fora da lista automática, acompanhados um por um):</p>
-      <ul class="avulso-list cs-avulso-list"></ul>
-      <div class="custom-source-actions">
-        <a href="addSource.html?edit=${encodeURIComponent(source.id)}" class="btn">Remapear campos</a>
-        <button class="btn danger cs-remove">Remover fonte</button>
+      <summary>
+        <span class="cs-summary-title">${escapeHtml(source.label)}</span>
+        <span class="cs-summary-meta muted small">${modeBadge} · ${columnCount} coluna(s) · ${avulsoCount} avulso(s)</span>
+        ${disabledBadge}
+      </summary>
+      <div class="cs-body">
+        <label class="checkbox-row small source-enable-row">
+          <input type="checkbox" class="cs-enabled" ${source.enabled !== false ? 'checked' : ''} />
+          Verificar esta fonte
+        </label>
+        <label class="checkbox-row small source-listmode-row">
+          <input type="checkbox" class="cs-listmode" ${source.listMode ? 'checked' : ''} />
+          Rastrear automaticamente todo chamado que aparece nessa lista (como GLPI/Evolutize/Movidesk) — sem precisar informar o número
+        </label>
+        <p class="muted small">Lista: <code>${escapeHtml(source.listUrl || '')}</code> — ${columnCount} coluna(s) mapeada(s)</p>
+        <label class="small cs-avulso-url-row">
+          URL separada só pra busca de avulsos (opcional — deixe em branco pra usar a mesma lista acima; preencha se os avulsos ficam numa tela diferente, ex: sem o filtro "atribuídos a mim")
+          <input type="text" class="cs-avulso-url" placeholder="Deixe em branco pra usar a URL da lista" value="${escapeHtml(source.avulsoListUrl || '')}" />
+        </label>
+        <div class="avulso-add">
+          <input type="text" class="cs-avulso-input" placeholder="Número do chamado, ou cole a URL dele" />
+          <button class="btn cs-add-avulso">Adicionar</button>
+        </div>
+        <p class="muted small">Avulsos (chamados fora da lista automática, acompanhados um por um):</p>
+        <ul class="avulso-list cs-avulso-list"></ul>
+        <div class="custom-source-actions">
+          <a href="addSource.html?edit=${encodeURIComponent(source.id)}" class="btn">Remapear campos</a>
+          <button class="btn danger cs-remove">Remover fonte</button>
+        </div>
       </div>
     `;
+    block.addEventListener('toggle', () => {
+      setCustomSourceCollapsed(source.id, !block.open);
+    });
 
     const ul = block.querySelector('.cs-avulso-list');
     renderAvulsoListInto(
@@ -467,12 +500,15 @@ function renderCustomSources(config) {
 
 function renderCustomAvulsoStatus(state, config) {
   const wrap = el('customAvulsoStatusGrid');
+  const section = el('customAvulsoStatusSection');
   const sources = config.customSources || [];
   if (!sources.length) {
     wrap.innerHTML = '';
     wrap.classList.add('hidden');
+    section?.classList.add('hidden');
     return;
   }
+  section?.classList.remove('hidden');
   wrap.classList.remove('hidden');
   wrap.innerHTML = '';
   sources.forEach((source) => {
@@ -496,13 +532,16 @@ function renderCustomAvulsoStatus(state, config) {
 // lista em vez de tabela.
 function renderCustomListStatus(state, config) {
   const wrap = el('customListStatusGrid');
+  const section = el('customListStatusSection');
   const sources = (config.customSources || []).filter((s) => s.listMode);
   if (!sources.length) {
     wrap.innerHTML = '';
     wrap.classList.add('hidden');
+    section?.classList.add('hidden');
     el('countCustomList').textContent = '';
     return;
   }
+  section?.classList.remove('hidden');
   wrap.classList.remove('hidden');
   wrap.innerHTML = '';
   let total = 0;
@@ -1214,4 +1253,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   loadAll();
 });
 
-loadAll();
+// Garante que já sabemos quais blocos de fonte personalizada estão minimizados antes do
+// primeiro render — senão eles nasceriam todos abertos e só recolheriam depois (piscando)
+// na primeira mudança de storage detectada pelo listener acima.
+loadCollapsedCustomSources().then(loadAll);

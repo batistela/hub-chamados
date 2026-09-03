@@ -440,6 +440,11 @@ code {
   padding: 1px 5px;
   font-size: 12px;
 }
+/* <details> em vez de <div> (desde 03/09/2026, pedido do Murilo: página ficou longa
+   demais com vários desenvolvimentos) — cada fonte personalizada pode ser minimizada
+   clicando no título, sobrando só ele + um resumo (modo, colunas mapeadas, avulsos) na
+   <summary>. Estado aberto/fechado é lido/gravado por renderCustomSources/
+   setCustomSourceCollapsed em dashboard.js (sobrevive a re-renders). */
 .custom-source-block {
   background: var(--subtle-bg);
   border-radius: 8px;
@@ -447,11 +452,22 @@ code {
   margin-bottom: 14px;
 }
 .custom-source-block:last-child { margin-bottom: 0; }
-.custom-source-block h3 { margin-top: 0; }
+.custom-source-block > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  user-select: none;
+}
+.custom-source-block > summary:hover { color: var(--primary); }
+.custom-source-block > summary .cs-summary-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.custom-source-block > summary .cs-summary-meta { flex: 1; min-width: 0; }
+.custom-source-block[open] > summary { margin-bottom: 10px; }
+.custom-source-block .cs-body h3 { margin-top: 0; }
 .custom-source-actions {
   display: flex;
   gap: 8px;
   margin-top: 8px;
   flex-wrap: wrap;
 }
-#customAvulsoStatusGrid { margin-top: 16px; }
