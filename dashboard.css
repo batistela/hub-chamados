@@ -413,3 +413,26 @@ main {
   color: var(--text);
   background: var(--input-bg);
 }
+
+/* ---------- fontes personalizadas ---------- */
+code {
+  background: var(--subtle-bg);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+}
+.custom-source-block {
+  background: var(--subtle-bg);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.custom-source-block:last-child { margin-bottom: 0; }
+.custom-source-block h3 { margin-top: 0; }
+.custom-source-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+#customAvulsoStatusGrid { margin-top: 16px; }

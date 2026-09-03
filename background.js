@@ -8,6 +8,7 @@ import {
   extractEvolutizeTramitacao,
   runMovidesk,
   extractMovideskAvulso,
+  extractCustomAvulso,
 } from './extractors.js';
 
 const GLPI_BASE = 'http://chamadosti.holambra.corp';
@@ -78,6 +79,14 @@ const DEFAULT_CONFIG = {
   // Atalhos puros (label + URL) pra outros sistemas que o Hub não monitora — só usados
   // pelo dashboard.js pra renderizar links, o background.js nunca lê isso.
   customLinks: [],
+  // Fontes de chamados cadastradas pelo próprio usuário (sites de fornecedores/parceiros
+  // que o Hub não conhece de fábrica) — cadastradas via addSource.html. Só modo avulso
+  // (um chamado por vez, por número); cada item tem
+  // { id, label, urlTemplate, selectors: {number,status,requester,lastUpdate,lastUpdateBy},
+  //   avulsos: [], avulsoStaleDays: {}, enabled }. `id` é um identificador interno que
+  // nunca muda (mesmo se o usuário renomear o `label` depois) — é ele que assina os dados
+  // salvos em state.customAvulsos, então renomear a fonte não perde histórico.
+  customSources: [],
   // Não tem mais um campo "updateCheckUrl" aqui — o link do version.json (aviso de
   // versão nova) agora é fixo no código, ver UPDATE_CHECK_URL mais abaixo.
 };
@@ -106,6 +115,7 @@ async function getState() {
       evolutizeAvulsos: {},
       movidesk: {},
       movideskAvulsos: {},
+      customAvulsos: {},
       staleAlerted: {},
     }
   );
@@ -496,6 +506,31 @@ async function checkMovideskAvulsos(tabId, numbers) {
   return out;
 }
 
+async function checkCustomAvulsos(tabId, source) {
+  const out = {};
+  const template = source.urlTemplate || '';
+  for (const num of source.avulsos || []) {
+    if (!template.includes('{numero}')) {
+      // urlTemplate vazio, ou sem o placeholder {numero} — não dá pra montar a URL do
+      // chamado. Isso não deveria acontecer (o assistente exige {numero}), mas melhor
+      // registrar um erro claro do que tentar navegar pra algo errado.
+      out[num] = { error: 'URL da fonte não tem {numero} configurado corretamente', number: num };
+      continue;
+    }
+    const url = template.replace('{numero}', encodeURIComponent(num));
+    try {
+      await navigateAndWait(tabId, url);
+      const data = await exec(tabId, extractCustomAvulso, [source.selectors || {}]);
+      const result = data || { title: '', status: '', lastUpdate: '', notFound: true };
+      result.url = url;
+      out[num] = result;
+    } catch (e) {
+      out[num] = { error: String(e && e.message ? e.message : e), number: num };
+    }
+  }
+  return out;
+}
+
 // ---------- diffing ----------
 
 function toMap(list) {
@@ -676,6 +711,19 @@ function checkStaleTickets(config, state) {
     { key: 'movidesk', label: 'Movidesk', map: state.movidesk || {}, avulso: false },
     { key: 'movidesk', label: 'Movidesk (avulso)', map: state.movideskAvulsos || {}, avulso: true, overrides: config.movideskAvulsoStaleDays },
   ];
+
+  // Fontes personalizadas — sempre avulso, então entram no mesmo formato dos outros
+  // "(avulso)" acima, uma entrada por fonte cadastrada.
+  for (const source of config.customSources || []) {
+    if (!source || !source.id) continue;
+    sources.push({
+      key: `custom:${source.id}`,
+      label: `${source.label} (avulso)`,
+      map: (state.customAvulsos || {})[source.id] || {},
+      avulso: true,
+      overrides: source.avulsoStaleDays,
+    });
+  }
 
   for (const src of sources) {
     for (const [id, data] of Object.entries(src.map)) {
@@ -1050,6 +1098,31 @@ async function runCheck() {
             errors.movideskAvulsos = String(e && e.message ? e.message : e);
           }
         }
+      }
+
+      // Fontes personalizadas — sempre avulso (ver DEFAULT_CONFIG.customSources). Cada
+      // fonte é independente: se uma falhar (ex: permissão de domínio revogada, site fora
+      // do ar), só ela fica com erro — não afeta as outras nem as três fontes fixas acima.
+      state.customAvulsos = state.customAvulsos || {};
+      for (const source of config.customSources || []) {
+        if (!source || !source.id) continue;
+        if (source.enabled === false || !(source.avulsos || []).length) continue;
+        try {
+          const results = await checkCustomAvulsos(tabId, source);
+          const { resultMap, events } = diffAvulsoSource(`${source.label} (avulso)`, state.customAvulsos[source.id] || {}, results);
+          state.customAvulsos[source.id] = resultMap;
+          allEvents.push(...events);
+        } catch (e) {
+          console.error(`Falha ao checar fonte personalizada ${source.label}`, e);
+          errors[`custom:${source.id}`] = String(e && e.message ? e.message : e);
+        }
+      }
+      // Poda o estado de fontes personalizadas que já foram removidas da configuração —
+      // senão fica um resto órfão em state.customAvulsos que nunca mais é atualizado nem
+      // exibido em lugar nenhum.
+      const validCustomIds = new Set((config.customSources || []).map((s) => s.id));
+      for (const id of Object.keys(state.customAvulsos)) {
+        if (!validCustomIds.has(id)) delete state.customAvulsos[id];
       }
     });
 

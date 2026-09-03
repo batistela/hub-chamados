@@ -109,6 +109,15 @@
     </section>
 
     <section class="card">
+      <div class="section-header">
+        <h2>Fontes personalizadas</h2>
+        <a href="addSource.html" class="btn primary">+ Adicionar fonte personalizada</a>
+      </div>
+      <p class="muted small">Chamados de outros sites de fornecedores/parceiros que o Hub não conhece de fábrica — acompanhados um por vez pelo número (modo avulso), com os campos (status, requerente, etc.) que você mesmo selecionar na página do site.</p>
+      <div id="customSourcesList"></div>
+    </section>
+
+    <section class="card">
       <h2>Links rápidos</h2>
       <p class="muted small">Atalhos pra outros sistemas que você (ou um colega) usa pra acompanhar chamados, mas que o Hub não monitora — só abre a página numa aba nova, sem verificação nem notificação automática.</p>
       <div class="avulso-add">
@@ -244,6 +253,7 @@
           <ul id="mdAvulsoStatus" class="avulso-status-list"></ul>
         </div>
       </div>
+      <div class="avulsos-status-grid hidden" id="customAvulsoStatusGrid"></div>
     </section>
   </main>
 

@@ -1,5 +1,5 @@
 {
-  "version": "1.3.0",
-  "notes": "Card de manutenção de dados (limpar Atualizações/Histórico e histórico por chamado, por idade e com confirmação em duas etapas) e checkbox pra desligar uma fonte inteira (GLPI/Evolutize/Movidesk) — útil pra quem não tem acesso a alguma delas.",
+  "version": "1.4.0",
+  "notes": "Suporte a fontes personalizadas (outros sites de fornecedores, modo avulso) com assistente de mapeamento de campos por clique — além do card de manutenção de dados e do checkbox pra desligar uma fonte inteira, das versões anteriores.",
   "url": "https://github.com/batistela/hub-chamados"
 }

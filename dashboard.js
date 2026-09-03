@@ -55,6 +55,10 @@ function fmtEventTime(ts) {
   return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR');
 }
 
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 async function loadAll() {
   const { config, state, events, ticketHistory, lastCheck, lastCheckOk, lastCheckError, sourceErrors, updateInfo } = await chrome.storage.local.get([
     'config', 'state', 'events', 'ticketHistory', 'lastCheck', 'lastCheckOk', 'lastCheckError', 'sourceErrors', 'updateInfo',
@@ -138,6 +142,8 @@ function renderConfig(config) {
   renderAvulsoList('evoAvulsoList', config.evolutizeAvulsos || [], config.evolutizeAvulsoStaleDays || {}, removeEvoAvulso, updateEvoAvulsoStale);
   renderAvulsoList('mdAvulsoList', config.movideskAvulsos || [], config.movideskAvulsoStaleDays || {}, removeMdAvulso, updateMdAvulsoStale);
   renderCustomLinks(config.customLinks || []);
+  renderCustomSources(config);
+  renderQueryTicketSourceOptions(config);
 
   el('filterGlpi').value = tableFilters.glpi.search;
   el('hideClosedGlpi').checked = tableFilters.glpi.hideClosed;
@@ -166,7 +172,10 @@ function updateSourceDisabledUI(config) {
 }
 
 function renderAvulsoList(listId, items, staleOverrides, onRemove, onStaleChange) {
-  const ul = el(listId);
+  renderAvulsoListInto(el(listId), items, staleOverrides, onRemove, onStaleChange);
+}
+
+function renderAvulsoListInto(ul, items, staleOverrides, onRemove, onStaleChange) {
   ul.innerHTML = '';
   if (!items.length) {
     ul.innerHTML = '<li class="muted">Nenhum chamado avulso cadastrado.</li>';
@@ -288,6 +297,139 @@ async function removeCustomLink(idx) {
   loadAll();
 }
 
+// ---------- fontes personalizadas (cadastradas via addSource.html) ----------
+
+async function updateCustomSource(id, mutator) {
+  const config = await currentConfig();
+  const list = config.customSources || [];
+  const idx = list.findIndex((s) => s.id === id);
+  if (idx === -1) return;
+  const next = { ...list[idx] };
+  mutator(next);
+  list[idx] = next;
+  config.customSources = list;
+  await chrome.storage.local.set({ config });
+  loadAll();
+}
+
+async function removeCustomSource(id) {
+  const config = await currentConfig();
+  config.customSources = (config.customSources || []).filter((s) => s.id !== id);
+  await chrome.storage.local.set({ config });
+  // Limpa o resto do estado salvo dessa fonte também — senão fica órfão até o
+  // background.js podar sozinho na próxima checagem (o que já faz, mas não custa nada
+  // já deixar limpo aqui pra UI não mostrar lixo até lá).
+  const { state } = await chrome.storage.local.get('state');
+  if (state && state.customAvulsos && state.customAvulsos[id]) {
+    delete state.customAvulsos[id];
+    await chrome.storage.local.set({ state });
+  }
+  loadAll();
+}
+
+function renderCustomSources(config) {
+  const container = el('customSourcesList');
+  const sources = config.customSources || [];
+  if (!sources.length) {
+    container.innerHTML = '<p class="muted small">Nenhuma fonte personalizada cadastrada ainda.</p>';
+    return;
+  }
+  container.innerHTML = '';
+  sources.forEach((source) => {
+    const fieldCount = Object.keys(source.selectors || {}).length;
+    const block = document.createElement('div');
+    block.className = 'custom-source-block';
+    block.innerHTML = `
+      <h3>${escapeHtml(source.label)}</h3>
+      <label class="checkbox-row small source-enable-row">
+        <input type="checkbox" class="cs-enabled" ${source.enabled !== false ? 'checked' : ''} />
+        Verificar esta fonte
+      </label>
+      <p class="muted small">URL: <code>${escapeHtml(source.urlTemplate || '')}</code> — ${fieldCount} campo(s) mapeado(s)</p>
+      <div class="avulso-add">
+        <input type="text" class="cs-avulso-input" placeholder="Número do chamado" />
+        <button class="btn cs-add-avulso">Adicionar</button>
+      </div>
+      <ul class="avulso-list cs-avulso-list"></ul>
+      <div class="custom-source-actions">
+        <a href="addSource.html?edit=${encodeURIComponent(source.id)}" class="btn">Remapear campos</a>
+        <button class="btn danger cs-remove">Remover fonte</button>
+      </div>
+    `;
+
+    const ul = block.querySelector('.cs-avulso-list');
+    renderAvulsoListInto(
+      ul,
+      source.avulsos || [],
+      source.avulsoStaleDays || {},
+      (num) => updateCustomSource(source.id, (s) => {
+        s.avulsos = (s.avulsos || []).filter((n) => n !== num);
+        if (s.avulsoStaleDays) delete s.avulsoStaleDays[num];
+      }),
+      (num, value) => updateCustomSource(source.id, (s) => {
+        s.avulsoStaleDays = applyStaleOverride(s.avulsoStaleDays, num, value);
+      })
+    );
+
+    block.querySelector('.cs-enabled').addEventListener('change', (ev) => {
+      updateCustomSource(source.id, (s) => { s.enabled = ev.target.checked; });
+    });
+    block.querySelector('.cs-add-avulso').addEventListener('click', () => {
+      const input = block.querySelector('.cs-avulso-input');
+      const num = input.value.trim();
+      // Menos rígido que o \d+ das três fontes fixas — fornecedores diferentes podem
+      // usar números de chamado alfanuméricos (ex: "TCK-1234").
+      if (!num || /\s/.test(num)) return;
+      updateCustomSource(source.id, (s) => { s.avulsos = [...new Set([...(s.avulsos || []), num])]; });
+      input.value = '';
+    });
+    wireConfirmButton(block.querySelector('.cs-remove'), 'Confirma? (clique de novo)', () => removeCustomSource(source.id));
+
+    container.appendChild(block);
+  });
+}
+
+function renderCustomAvulsoStatus(state, config) {
+  const wrap = el('customAvulsoStatusGrid');
+  const sources = config.customSources || [];
+  if (!sources.length) {
+    wrap.innerHTML = '';
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = '';
+  sources.forEach((source) => {
+    const div = document.createElement('div');
+    const h3 = document.createElement('h3');
+    h3.textContent = source.label;
+    const ul = document.createElement('ul');
+    ul.className = 'avulso-status-list';
+    div.appendChild(h3);
+    div.appendChild(ul);
+    wrap.appendChild(div);
+    const map = (state.customAvulsos && state.customAvulsos[source.id]) || {};
+    fillAvulsoStatusInto(ul, map, null, source.enabled === false, (source.avulsos || []).length);
+  });
+}
+
+// "Consultar chamado" também precisa listar as fontes personalizadas cadastradas, não só
+// as três fixas — senão não dá pra filtrar a busca por elas (buscar em "Todas as fontes"
+// ainda funciona sem isso, só o filtro específico que ficaria faltando).
+function renderQueryTicketSourceOptions(config) {
+  const select = el('queryTicketSource');
+  const previousValue = select.value;
+  Array.from(select.querySelectorAll('option[data-dynamic]')).forEach((o) => o.remove());
+  (config.customSources || []).forEach((source) => {
+    const opt = document.createElement('option');
+    opt.value = source.label;
+    opt.textContent = source.label;
+    opt.dataset.dynamic = '1';
+    select.appendChild(opt);
+  });
+  if (Array.from(select.options).some((o) => o.value === previousValue)) select.value = previousValue;
+}
+
 function renderState(state) {
   const glpiDisabled = lastConfig.glpiEnabled === false;
   const evoDisabled = lastConfig.evolutizeEnabled === false;
@@ -301,6 +443,8 @@ function renderState(state) {
   fillAvulsoStatus('glpiAvulsoStatus', state.glpiAvulsos || {}, (id) => `${GLPI_BASE}/front/ticket.form.php?id=${id}`, glpiDisabled, (lastConfig.glpiAvulsos || []).length);
   fillAvulsoStatus('evoAvulsoStatus', state.evolutizeAvulsos || {}, null, evoDisabled, (lastConfig.evolutizeAvulsos || []).length);
   fillAvulsoStatus('mdAvulsoStatus', state.movideskAvulsos || {}, (id) => `${MOVIDESK_BASE}/Ticket/Edit/${id}`, mdDisabled, (lastConfig.movideskAvulsos || []).length);
+
+  renderCustomAvulsoStatus(state, lastConfig);
 }
 
 function applyTableFilter(entries, filter) {
@@ -389,7 +533,10 @@ function fillTable(tableId, countId, map, linkFn, fields, filter, disabledMessag
 }
 
 function fillAvulsoStatus(listId, map, linkFn, disabled, configuredCount) {
-  const ul = el(listId);
+  fillAvulsoStatusInto(el(listId), map, linkFn, disabled, configuredCount);
+}
+
+function fillAvulsoStatusInto(ul, map, linkFn, disabled, configuredCount) {
   ul.innerHTML = '';
   if (disabled) {
     ul.innerHTML = configuredCount
@@ -410,17 +557,21 @@ function fillAvulsoStatus(listId, map, linkFn, disabled, configuredCount) {
     } else {
       const title = data.title || '(sem título capturado)';
       const statusTxt = data.status ? ` [${data.status}]` : '';
+      // `requester` só existe pra fontes personalizadas (extractCustomAvulso) — nas
+      // fontes fixas (GLPI/Evolutize/Movidesk) esse campo nunca vem preenchido no
+      // avulso, então essa parte simplesmente não aparece pra elas.
+      const requesterTxt = data.requester ? ` — requerente: ${data.requester}` : '';
       const updateTxt = data.lastUpdate
         ? ` — última tramitação: ${data.lastUpdate}${data.lastUpdateBy ? ` (${data.lastUpdateBy})` : ''}`
         : '';
-      // Pra Evolutize, `data.url` é o link fixo descoberto/confirmado na última
-      // checagem — usa ele quando existir, já que é o mesmo link salvo em
-      // config.evolutizeAvulsoUrls e evita depender só da busca por número.
+      // Pra Evolutize e pras fontes personalizadas, `data.url` é o link direto da
+      // checagem mais recente — usa ele quando existir; GLPI/Movidesk têm URL sempre
+      // previsível por ID (linkFn).
       const href = data.url || (linkFn ? linkFn(id) : null);
       if (href) {
-        li.innerHTML = `<a href="${href}" target="_blank">${id}</a> — ${title}${statusTxt}${updateTxt}`;
+        li.innerHTML = `<a href="${href}" target="_blank">${escapeHtml(id)}</a> — ${escapeHtml(title)}${escapeHtml(statusTxt)}${escapeHtml(requesterTxt)}${escapeHtml(updateTxt)}`;
       } else {
-        li.textContent = `${id} — ${title}${statusTxt}${updateTxt}`;
+        li.textContent = `${id} — ${title}${statusTxt}${requesterTxt}${updateTxt}`;
       }
     }
     ul.appendChild(li);
@@ -583,7 +734,8 @@ async function acknowledgeAllEvents() {
 async function queryTicketHistory(sourceFilter, number) {
   const { ticketHistory } = await chrome.storage.local.get('ticketHistory');
   const map = ticketHistory || {};
-  const sources = sourceFilter ? [sourceFilter] : ['GLPI', 'Evolutize', 'Movidesk'];
+  const customLabels = (lastConfig.customSources || []).map((s) => s.label);
+  const sources = sourceFilter ? [sourceFilter] : ['GLPI', 'Evolutize', 'Movidesk', ...customLabels];
   let combined = [];
   for (const src of sources) {
     const list = map[`${src}::${number}`];
@@ -676,7 +828,7 @@ const CONFIG_FIELDS = [
   'glpiAvulsos', 'glpiOnlyAvulsos', 'glpiAvulsoStaleDays',
   'evolutizeAvulsos', 'evolutizeOnlyAvulsos', 'evolutizeAvulsoUrls', 'evolutizeAvulsoStaleDays',
   'movideskAvulsos', 'movideskOnlyAvulsos', 'movideskAvulsoStaleDays',
-  'staleDays', 'customLinks',
+  'staleDays', 'customLinks', 'customSources',
 ];
 
 function showImportStatus(message, isError) {
@@ -723,6 +875,24 @@ function sanitizeImportedConfig(incoming) {
           .filter((x) => x && typeof x === 'object' && typeof x.url === 'string' && x.url)
           .map((x) => ({ label: typeof x.label === 'string' && x.label ? x.label : x.url, url: x.url }))
       : undefined;
+  const SELECTOR_KEYS = ['number', 'status', 'requester', 'lastUpdate', 'lastUpdateBy'];
+  const asCustomSources = (v) =>
+    Array.isArray(v)
+      ? v
+          .filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && x.id && typeof x.label === 'string' && x.label && typeof x.urlTemplate === 'string')
+          .map((x) => ({
+            id: x.id,
+            label: x.label,
+            urlTemplate: x.urlTemplate,
+            selectors:
+              x.selectors && typeof x.selectors === 'object' && !Array.isArray(x.selectors)
+                ? Object.fromEntries(Object.entries(x.selectors).filter(([k, sv]) => SELECTOR_KEYS.includes(k) && typeof sv === 'string' && sv))
+                : {},
+            avulsos: asArrayOfStrings(x.avulsos) || [],
+            avulsoStaleDays: asPlainObject(x.avulsoStaleDays) || {},
+            enabled: typeof x.enabled === 'boolean' ? x.enabled : true,
+          }))
+      : undefined;
 
   const out = {
     intervalMinutes: asNumber(incoming.intervalMinutes),
@@ -743,6 +913,7 @@ function sanitizeImportedConfig(incoming) {
     movideskAvulsoStaleDays: asPlainObject(incoming.movideskAvulsoStaleDays),
     staleDays: asNumber(incoming.staleDays),
     customLinks: asCustomLinks(incoming.customLinks),
+    customSources: asCustomSources(incoming.customSources),
   };
   // Remove campos que não bateram na validação, pra não sobrescrever o que já estava
   // salvo com "undefined".

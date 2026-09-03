@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!-- Hub de Chamados — autoria original: Murilo (murilobats@gmail.com), início em ago/2026. -->
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Hub de Chamados — Nova fonte</title>
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="addSource.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1 id="wizardTitle">Nova fonte personalizada</h1>
+    <div class="topbar-actions">
+      <a href="dashboard.html" class="btn">← Voltar ao Hub</a>
+    </div>
+  </header>
+
+  <main class="wizard-main">
+    <section class="card" id="stepBasics">
+      <h2>1. Informações básicas</h2>
+      <div class="wizard-grid">
+        <label>
+          Nome pra identificar essa fonte no Hub
+          <input type="text" id="sourceLabel" placeholder="Ex: Zendesk" />
+        </label>
+        <label class="full-width">
+          URL do chamado — use <code>{numero}</code> no lugar do número
+          <input type="text" id="sourceUrlTemplate" placeholder="https://suporte.fornecedor.com/tickets/{numero}" />
+        </label>
+        <label>
+          Número de um chamado real (só pra abrir a página de exemplo agora)
+          <input type="text" id="sampleNumber" placeholder="Ex: 12345" />
+        </label>
+      </div>
+      <p id="basicsHint" class="muted small"></p>
+      <button id="btnOpenSample" class="btn primary">Abrir página de exemplo</button>
+    </section>
+
+    <section class="card hidden" id="stepPicker">
+      <h2>2. Selecionar os campos</h2>
+      <p class="muted small">Clique em "Selecionar", depois clique no elemento certo na aba que abrimos (ela foi trazida pra frente). Se esse campo não existir nesse site, clique em "Pular" — dá pra voltar e mapear depois.</p>
+      <ul class="picker-fields" id="pickerFields"></ul>
+      <div class="wizard-actions">
+        <button id="btnOpenSampleAgain" class="btn">Reabrir página de exemplo</button>
+        <button id="btnSaveSource" class="btn primary" disabled>Salvar fonte</button>
+      </div>
+      <p id="pickerStatus" class="muted small"></p>
+    </section>
+  </main>
+
+  <script src="addSource.js"></script>
+</body>
+</html>

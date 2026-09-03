@@ -424,3 +424,32 @@ export async function runMovidesk() {
     return { id: card.dataset.number || lines[0] || '', title: lines[1] || '', status: best || '' };
   });
 }
+
+// ---------- fontes personalizadas (avulso, cadastradas pelo usuário) ----------
+// Diferente das outras extractXxx acima (seletores fixos, escritos à mão pra um site
+// específico), essa é genérica: os seletores vêm de fora (config.customSources, montados
+// pelo assistente de "adicionar fonte" — ver addSource.js), um por campo. Se um seletor
+// não bater com nada na página (site mudou o layout, ou esse campo nunca existiu nesse
+// site), o campo correspondente simplesmente fica vazio — não derruba a extração dos
+// outros campos, e o Hub mostra esse chamado avulso como "sem X capturado" em vez de dar
+// erro.
+export function extractCustomAvulso(selectors) {
+  function textOf(sel) {
+    if (!sel) return '';
+    try {
+      const elm = document.querySelector(sel);
+      return elm ? (elm.innerText || elm.textContent || '').replace(/\s+/g, ' ').trim() : '';
+    } catch (e) {
+      return ''; // seletor salvo não é mais válido nessa página — trata como "não capturado"
+    }
+  }
+  const sel = selectors || {};
+  const title = (document.title || '').trim();
+  const number = textOf(sel.number);
+  const status = textOf(sel.status);
+  const requester = textOf(sel.requester);
+  const lastUpdate = textOf(sel.lastUpdate);
+  const lastUpdateBy = textOf(sel.lastUpdateBy);
+  const notFound = !status && !requester && !lastUpdate && !lastUpdateBy && !number;
+  return { title, number, status, requester, lastUpdate, lastUpdateBy, notFound };
+}
