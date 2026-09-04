@@ -4,21 +4,30 @@ const MOVIDESK_BASE = 'https://keyrus-brasil.movidesk.com';
 
 // dashboard.js é um <script> comum, não um módulo — não dá pra importar
 // normalizeCustomListColumns de extractors.js aqui (só addSource.js/background.js
-// conseguem, os dois são módulos ES). Essa é a mesma lógica duplicada: converte o formato
-// antigo de columns (sem `fields`, com status/requester/lastUpdate/lastUpdateBy fixos)
-// pro formato novo, só pra contar quantos campos uma fonte tem mapeado (ver
-// renderCustomSources) — o resto da exibição de fontes personalizadas não precisa
-// entender esse esquema, porque background.js já resolve os papéis antes de gravar em
-// state.customAvulsos (ver checkCustomAvulsos).
+// conseguem, os dois são módulos ES). `customSourceFieldList` é a mesma lógica duplicada:
+// converte o formato antigo de columns (sem `fields`, com
+// status/requester/lastUpdate/lastUpdateBy fixos) pro formato novo — uma lista ORDENADA
+// de campos livres, cada um com `key`/`label`/`role`. Usada tanto pra contar quantos
+// campos uma fonte tem mapeado (`countMappedColumns`) quanto — desde v1.10.2 — pra montar
+// o CABEÇALHO das tabelas de status de avulsos/lista automática (ver
+// renderCustomEntriesTable): o `state` já vem com os valores resolvidos por papel
+// (title/status/lastUpdate/lastUpdateBy/extraFields, ver checkCustomAvulsos/
+// checkCustomList em background.js), mas não carrega rótulo nem ordem de exibição — só a
+// config (`source.columns`) tem isso.
+function customSourceFieldList(columns) {
+  const cols = columns || {};
+  if (Array.isArray(cols.fields)) return cols.fields;
+  const fields = [];
+  if (cols.status) fields.push({ key: 'status', label: 'Status', role: 'status' });
+  if (cols.requester) fields.push({ key: 'requester', label: 'Requerente', role: 'info' });
+  if (cols.lastUpdate) fields.push({ key: 'lastUpdate', label: 'Data e hora da atualização', role: 'lastUpdate' });
+  if (cols.lastUpdateBy) fields.push({ key: 'lastUpdateBy', label: 'Usuário da tramitação', role: 'lastUpdateBy' });
+  return fields;
+}
+
 function countMappedColumns(columns) {
   const cols = columns || {};
-  let n = cols.number ? 1 : 0;
-  if (Array.isArray(cols.fields)) {
-    n += cols.fields.length;
-  } else {
-    for (const k of ['status', 'requester', 'lastUpdate', 'lastUpdateBy']) if (cols[k]) n++;
-  }
-  return n;
+  return (cols.number ? 1 : 0) + customSourceFieldList(columns).length;
 }
 
 const el = (id) => document.getElementById(id);
@@ -535,39 +544,29 @@ function renderCustomAvulsoStatus(state, config) {
   const section = el('customAvulsoStatusSection');
   const sources = config.customSources || [];
   if (!sources.length) {
-    wrap.innerHTML = '';
+    pruneCustomBlocks('avulso', new Set());
     wrap.classList.add('hidden');
     section?.classList.add('hidden');
     return;
   }
   section?.classList.remove('hidden');
   wrap.classList.remove('hidden');
-  wrap.innerHTML = '';
+  pruneCustomBlocks('avulso', new Set(sources.map((s) => s.id)));
   sources.forEach((source) => {
-    const div = document.createElement('div');
-    const h3 = document.createElement('h3');
-    h3.textContent = source.label;
-    const ul = document.createElement('ul');
-    ul.className = 'avulso-status-list';
-    div.appendChild(h3);
-    div.appendChild(ul);
-    wrap.appendChild(div);
     const map = (state.customAvulsos && state.customAvulsos[source.id]) || {};
-    fillAvulsoStatusInto(ul, map, null, source.enabled === false, (source.avulsos || []).length);
+    updateCustomEntriesBlock(wrap, `${source.id}:avulso`, source.label, source, map, source.enabled === false, (source.avulsos || []).length);
   });
 }
 
-// "Modo lista" (04/09/2026) — só entram aqui as fontes com listMode ligado; reaproveita
-// fillAvulsoStatusInto (já lida com id/title/status/extraFields/lastUpdate genericamente)
-// em vez de montar uma tabela de colunas fixas, porque os campos de cada fonte
-// personalizada são livres/variáveis — o mesmo motivo que a área de avulsos acima já usa
-// lista em vez de tabela.
+// "Modo lista" (04/09/2026) — só entram aqui as fontes com listMode ligado. Desde
+// v1.10.2, cada fonte vira uma tabela de verdade (renderCustomEntriesTable) em vez de uma
+// lista de texto corrido — ver comentário dessa função pro porquê.
 function renderCustomListStatus(state, config) {
   const wrap = el('customListStatusGrid');
   const section = el('customListStatusSection');
   const sources = (config.customSources || []).filter((s) => s.listMode);
   if (!sources.length) {
-    wrap.innerHTML = '';
+    pruneCustomBlocks('lista', new Set());
     wrap.classList.add('hidden');
     section?.classList.add('hidden');
     el('countCustomList').textContent = '';
@@ -575,20 +574,12 @@ function renderCustomListStatus(state, config) {
   }
   section?.classList.remove('hidden');
   wrap.classList.remove('hidden');
-  wrap.innerHTML = '';
+  pruneCustomBlocks('lista', new Set(sources.map((s) => s.id)));
   let total = 0;
   sources.forEach((source) => {
-    const div = document.createElement('div');
-    const h3 = document.createElement('h3');
-    h3.textContent = source.label;
-    const ul = document.createElement('ul');
-    ul.className = 'avulso-status-list';
-    div.appendChild(h3);
-    div.appendChild(ul);
-    wrap.appendChild(div);
     const map = (state.customList && state.customList[source.id]) || {};
     total += Object.keys(map).length;
-    fillAvulsoStatusInto(ul, map, null, source.enabled === false, 0, 'Nenhum chamado encontrado nessa lista ainda (ou ainda não verificado).');
+    updateCustomEntriesBlock(wrap, `${source.id}:lista`, source.label, source, map, source.enabled === false, 0, 'Nenhum chamado encontrado nessa lista ainda (ou ainda não verificado).');
   });
   el('countCustomList').textContent = total ? `(${total})` : '';
 }
@@ -761,6 +752,226 @@ function fillAvulsoStatusInto(ul, map, linkFn, disabled, configuredCount, emptyM
       }
     }
     ul.appendChild(li);
+  });
+}
+
+// Status de avulsos/lista automática de fontes PERSONALIZADAS — desde v1.10.2, uma
+// tabela de verdade (colunas = os campos que o usuário selecionou no assistente, na
+// mesma ordem/rótulo que ele escolheu) em vez da linha de texto corrida de
+// fillAvulsoStatusInto acima (ainda usada só pro GLPI/Evolutize/Movidesk, que não têm
+// esse conceito de "campos livres"). Pedido do Murilo: "os campos que foram capturados e
+// selecionados via CSS... se tornarem cabeçalhos em colunas para deixar a informação mais
+// agradável visualmente... a minha ideia era essa desde o início." O `state` já vem com
+// os valores resolvidos por PAPEL (checkCustomAvulsos/checkCustomList, background.js) —
+// título/status/última-atualização/quem-atualizou nos campos fixos do objeto, e o resto
+// em `extraFields` (lista de `{key,label,value}`) — então cada coluna só precisa saber
+// que PAPEL ler; o rótulo do cabeçalho vem de `customSourceFieldList(source.columns)`,
+// não do `state`.
+function customFieldValue(field, data, extraByKey) {
+  switch (field.role) {
+    case 'title': return data.title || '';
+    case 'status': return data.status || '';
+    case 'lastUpdate': return data.lastUpdate || '';
+    case 'lastUpdateBy': return data.lastUpdateBy || '';
+    default: return (extraByKey[field.key] != null ? extraByKey[field.key] : '') || '';
+  }
+}
+
+// Filtros de exibição das tabelas de fontes personalizadas — mesmo espírito de
+// `tableFilters` (GLPI/Evolutize, lá em cima), mas chaveado por fonte porque aqui o
+// número de blocos é dinâmico. A chave (`filterKey`) inclui se é avulso ou lista
+// automática (`${source.id}:avulso` / `${source.id}:lista`) porque a mesma fonte
+// personalizada pode aparecer nos dois blocos ao mesmo tempo, cada um com seu próprio
+// filtro independente. Também fica só em memória, igual ao `tableFilters` original.
+const customTableFilters = {};
+function getCustomTableFilter(key) {
+  if (!customTableFilters[key]) customTableFilters[key] = { search: '', hideClosed: true };
+  return customTableFilters[key];
+}
+
+function applyCustomTableFilter(entries, filter, fields) {
+  if (!filter) return entries;
+  let out = entries;
+  if (filter.hideClosed) {
+    // Linha de erro sempre fica visível mesmo com "ocultar encerrados" marcado — não tem
+    // status pra avaliar, e esconder erro de checagem seria mais confuso que ajudar.
+    out = out.filter(([, data]) => data.error || !CLOSED_STATUS_RE.test(data.status || ''));
+  }
+  const term = (filter.search || '').trim().toLowerCase();
+  if (term) {
+    out = out.filter(([id, data]) => {
+      const extraByKey = {};
+      (data.extraFields || []).forEach((f) => { extraByKey[f.key] = f.value; });
+      const values = fields.map((f) => customFieldValue(f, data, extraByKey));
+      const haystack = `${id} ${values.join(' ')}`.toLowerCase();
+      return haystack.includes(term);
+    });
+  }
+  return out;
+}
+
+// Blocos das tabelas de fontes personalizadas (avulsos e lista automática) — desde
+// v1.10.2 guardados num cache por `filterKey` (getOrCreateCustomBlock) pra reaproveitar
+// os mesmos nós DOM entre re-renders. `renderCustomAvulsoStatus`/`renderCustomListStatus`
+// rodam a cada `chrome.storage.onChanged` (ou seja, a cada checagem em segundo plano) —
+// se cada chamada recriasse o bloco do zero (como a v1 desse recurso fazia, com
+// `container.innerHTML = ''`), o campo de busca seria destruído e recriado a cada
+// atualização, perdendo o foco/cursor no meio de uma digitação. Com o cache, a
+// estrutura (título + campo de busca + checkbox + área da tabela) é criada uma única
+// vez por fonte; toda atualização — seja por causa de dado novo, seja por causa do
+// usuário filtrando — só regenera a tabela dentro de `entry.target`.
+const customBlockCache = {};
+
+function getOrCreateCustomBlock(wrap, filterKey, label) {
+  let entry = customBlockCache[filterKey];
+  if (!entry) {
+    const div = document.createElement('div');
+    div.className = 'custom-entries-block';
+    const h3 = document.createElement('h3');
+    const labelText = document.createTextNode(`${label} `);
+    const countSpan = document.createElement('span');
+    countSpan.className = 'count';
+    h3.appendChild(labelText);
+    h3.appendChild(countSpan);
+    // Mesma estrutura/classes do filtro do GLPI e da Evolutize (ver dashboard.html,
+    // `.table-filter`/`.checkbox-row.small`) — pedido do Murilo foi "ser igual" ao bloco
+    // deles, então reaproveita o CSS existente em vez de criar algo novo.
+    const filterRow = document.createElement('div');
+    filterRow.className = 'table-filter';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Filtrar por número ou qualquer campo exibido na tabela...';
+    const checkboxLabel = document.createElement('label');
+    checkboxLabel.className = 'checkbox-row small';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkboxLabel.appendChild(checkbox);
+    checkboxLabel.appendChild(document.createTextNode('Ocultar encerrados/fechados'));
+    filterRow.appendChild(searchInput);
+    filterRow.appendChild(checkboxLabel);
+    const target = document.createElement('div');
+    div.appendChild(h3);
+    div.appendChild(filterRow);
+    div.appendChild(target);
+
+    const filter = getCustomTableFilter(filterKey);
+    searchInput.value = filter.search;
+    checkbox.checked = filter.hideClosed;
+
+    entry = { div, countSpan, labelText, target, current: null };
+    entry.renderRows = () => renderCustomEntriesRows(entry, filterKey);
+    // 'input' (não 'change') pra filtrar à medida que digita, igual ao GLPI/Evolutize —
+    // só é seguro aqui porque `renderRows()` nunca toca em `searchInput`/`checkbox`
+    // (só reconstrói `target`), então o campo nunca perde o foco no meio da digitação.
+    searchInput.addEventListener('input', () => {
+      filter.search = searchInput.value;
+      entry.renderRows();
+    });
+    checkbox.addEventListener('change', () => {
+      filter.hideClosed = checkbox.checked;
+      entry.renderRows();
+    });
+    customBlockCache[filterKey] = entry;
+  } else {
+    entry.labelText.textContent = `${label} `;
+  }
+  wrap.appendChild(entry.div); // no-op se já for o último filho; senão, reordena mantendo o mesmo nó (sem perder foco)
+  return entry;
+}
+
+function renderCustomEntriesRows(entry, filterKey) {
+  const { source, map, disabled, configuredCount, emptyMessage } = entry.current || {};
+  const target = entry.target;
+  target.innerHTML = '';
+  if (disabled) {
+    entry.countSpan.textContent = '';
+    target.innerHTML = `<p class="muted small">${
+      configuredCount
+        ? `Fonte desativada nas configurações — ${configuredCount} avulso(s) configurado(s), mas não verificado(s) agora.`
+        : 'Fonte desativada nas configurações.'
+    }</p>`;
+    return;
+  }
+  const allEntries = Object.entries(map || {});
+  if (!allEntries.length) {
+    entry.countSpan.textContent = '';
+    target.innerHTML = `<p class="muted small">${escapeHtml(emptyMessage || 'Nenhum chamado avulso configurado.')}</p>`;
+    return;
+  }
+  const fields = customSourceFieldList(source.columns);
+  const filter = getCustomTableFilter(filterKey);
+  const entries = applyCustomTableFilter(allEntries, filter, fields);
+  entry.countSpan.textContent = entries.length === allEntries.length
+    ? `(${allEntries.length})`
+    : `(${entries.length} de ${allEntries.length})`;
+  if (!entries.length) {
+    target.innerHTML = '<p class="muted small">Nenhum chamado corresponde ao filtro atual.</p>';
+    return;
+  }
+  const wrap = document.createElement('div');
+  wrap.className = 'table-scroll';
+  const table = document.createElement('table');
+  table.className = 'ticket-table custom-entries-table';
+  const totalCols = 1 + fields.length;
+  const thead = document.createElement('thead');
+  thead.innerHTML = `<tr><th>Número</th>${fields.map((f) => `<th>${escapeHtml(f.label || f.key)}</th>`).join('')}</tr>`;
+  const tbody = document.createElement('tbody');
+  entries.forEach(([id, data]) => {
+    const tr = document.createElement('tr');
+    if (data.error) {
+      tr.innerHTML = `<td colspan="${totalCols}" class="muted err">${escapeHtml(`${id}: ${data.error}`)}</td>`;
+      tbody.appendChild(tr);
+      return;
+    }
+    if (data.notFound) tr.className = 'notfound';
+    const numTd = document.createElement('td');
+    if (data.url) {
+      numTd.innerHTML = `<a href="${data.url}" target="_blank">${escapeHtml(id)}</a>`;
+    } else {
+      numTd.textContent = id;
+    }
+    if (data.notFound) {
+      const hint = document.createElement('span');
+      hint.className = 'muted small';
+      hint.textContent = ' (não encontrado na lista)';
+      numTd.appendChild(hint);
+    }
+    tr.appendChild(numTd);
+    const extraByKey = {};
+    (data.extraFields || []).forEach((f) => { extraByKey[f.key] = f.value; });
+    fields.forEach((field) => {
+      const td = document.createElement('td');
+      const value = customFieldValue(field, data, extraByKey);
+      td.textContent = value || '—';
+      if (!value) td.className = 'muted';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(thead);
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  target.appendChild(wrap);
+}
+
+function updateCustomEntriesBlock(wrap, filterKey, label, source, map, disabled, configuredCount, emptyMessage) {
+  const entry = getOrCreateCustomBlock(wrap, filterKey, label);
+  entry.current = { source, map, disabled, configuredCount, emptyMessage };
+  entry.renderRows();
+}
+
+// Remove do cache/DOM os blocos de fontes que não existem mais (removidas nas
+// configurações) — `suffix` é 'avulso' ou 'lista', pra não mexer no cache do outro
+// bloco (a mesma fonte pode existir nos dois ao mesmo tempo, com filtros independentes).
+function pruneCustomBlocks(suffix, keepIds) {
+  const suffixTag = `:${suffix}`;
+  Object.keys(customBlockCache).forEach((key) => {
+    if (!key.endsWith(suffixTag)) return;
+    const id = key.slice(0, -suffixTag.length);
+    if (keepIds.has(id)) return;
+    customBlockCache[key].div.remove();
+    delete customBlockCache[key];
+    delete customTableFilters[key];
   });
 }
 

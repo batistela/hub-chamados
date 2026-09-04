@@ -1,5 +1,5 @@
 {
-  "version": "1.10.1",
-  "notes": "Duas correções de bug: (1) remover um chamado avulso (de qualquer fonte, incluindo personalizadas) agora tira ele da tela de 'Avulsos acompanhados' na hora — antes ficava aparecendo até a próxima verificação automática rodar. (2) desmarcar 'Verificar esta fonte' no GLPI/Evolutize/Movidesk não apaga mais os chamados já registrados — antes zerava tudo na hora de desativar, e só voltava depois de reativar e rodar uma verificação nova; agora só pausa a checagem, mantendo os últimos dados conhecidos.",
+  "version": "1.10.2",
+  "notes": "As tabelas de 'Fontes personalizadas' (avulsos e lista automática) agora mostram os campos capturados como colunas de verdade, em vez de texto corrido — e ganharam busca + 'Ocultar encerrados/fechados', igual ao GLPI e à Evolutize.",
   "url": "https://github.com/batistela/hub-chamados"
 }

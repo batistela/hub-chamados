@@ -360,6 +360,20 @@ main {
 .avulso-status-list li { background: var(--subtle-bg); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
 .avulso-status-list li.err { color: var(--danger); }
 
+/* Status de avulsos/lista automática de fontes PERSONALIZADAS (desde v1.10.2) — cada
+   fonte é um bloco de LARGURA TOTAL (não a grade de 3 colunas acima, que é só pras 3
+   fontes fixas): os campos são livres/variáveis por fonte, viram colunas de uma tabela de
+   verdade, e uma tabela com várias colunas espremida num terço da largura do card ficava
+   pior, não melhor — o pedido do Murilo era exatamente o oposto ("deixar a informação
+   mais agradável visualmente"). `.table-scroll` evita que uma fonte com muitos campos
+   quebre o layout da página — a tabela rola por dentro, a página não. */
+.custom-entries-stack { display: flex; flex-direction: column; gap: 20px; }
+.custom-entries-block:not(:last-child) { padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+.table-scroll { overflow-x: auto; }
+.custom-entries-table td, .custom-entries-table th { white-space: nowrap; }
+.custom-entries-table tr.notfound { opacity: 0.6; }
+.custom-entries-table td.err { white-space: normal; color: var(--danger); }
+
 .banner {
   padding: 10px 24px;
   font-size: 13px;

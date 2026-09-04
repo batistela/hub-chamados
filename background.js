@@ -607,8 +607,12 @@ async function checkCustomAvulsos(tabId, source) {
       lastUpdate: lastUpdateField ? rawFields[lastUpdateField.key] || '' : '',
       lastUpdateBy: lastUpdateByField ? rawFields[lastUpdateByField.key] || '' : '',
       notFound: !!raw.notFound,
+      // `key` (desde v1.10.2) viaja junto com `label`/`value` — o dashboard usa ele pra
+      // casar cada campo com a coluna certa da tabela (rótulos poderiam colidir se o
+      // usuário nomear dois campos igual; `key` é sempre único, gerado uma vez no
+      // assistente e nunca muda, ver `field.key` em addSource.js).
       extraFields: infoFields
-        .map((f) => ({ label: f.label || f.key, value: rawFields[f.key] || '' }))
+        .map((f) => ({ key: f.key, label: f.label || f.key, value: rawFields[f.key] || '' }))
         .filter((f) => f.value),
     };
     // Prioridade do link mostrado no Hub pra esse chamado: URL que o próprio usuário
@@ -669,8 +673,12 @@ async function checkCustomList(tabId, source) {
       lastUpdate: lastUpdateField ? rawFields[lastUpdateField.key] || '' : '',
       lastUpdateBy: lastUpdateByField ? rawFields[lastUpdateByField.key] || '' : '',
       url: raw.url || source.listUrl,
+      // `key` (desde v1.10.2) viaja junto com `label`/`value` — o dashboard usa ele pra
+      // casar cada campo com a coluna certa da tabela (rótulos poderiam colidir se o
+      // usuário nomear dois campos igual; `key` é sempre único, gerado uma vez no
+      // assistente e nunca muda, ver `field.key` em addSource.js).
       extraFields: infoFields
-        .map((f) => ({ label: f.label || f.key, value: rawFields[f.key] || '' }))
+        .map((f) => ({ key: f.key, label: f.label || f.key, value: rawFields[f.key] || '' }))
         .filter((f) => f.value),
     });
   }
