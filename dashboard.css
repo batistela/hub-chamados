@@ -373,6 +373,19 @@ main {
 .custom-entries-table td, .custom-entries-table th { white-space: nowrap; }
 .custom-entries-table tr.notfound { opacity: 0.6; }
 .custom-entries-table td.err { white-space: normal; color: var(--danger); }
+/* Botão "remover" por linha (v1.10.4) — só aparece na tabela de "avulsos acompanhados"
+   (não na de "lista automática", ver comentário em renderCustomEntriesRows). Mesmo visual
+   do botão "remover" da lista de gerenciamento (.avulso-list button, acima). */
+.custom-entries-table td.actions { white-space: nowrap; }
+.row-remove-btn {
+  border: none;
+  background: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+.row-remove-btn:hover { text-decoration: underline; }
 
 .banner {
   padding: 10px 24px;

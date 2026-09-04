@@ -1,5 +1,5 @@
 {
-  "version": "1.10.3",
-  "notes": "Correção: colunas de 'informação' nas tabelas de fontes personalizadas (ex: 'Solicitante', 'Título') podiam aparecer vazias logo depois de atualizar a extensão, se o Hub ainda não tivesse rodado uma checagem nova. Agora a tabela também reconhece o dado salvo pela checagem anterior enquanto a próxima não roda.",
+  "version": "1.10.4",
+  "notes": "A tabela de 'Fontes personalizadas — avulsos acompanhados' ganhou um botão 'remover' por linha, direto na própria tabela — antes o único jeito de parar de acompanhar um avulso de fonte personalizada era abrir o bloco de configuração da fonte, mais abaixo na página.",
   "url": "https://github.com/batistela/hub-chamados"
 }

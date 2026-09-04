@@ -309,6 +309,26 @@ async function pruneCustomAvulsoFromState(sourceId, num) {
   }
 }
 
+// Remove um avulso de fonte personalizada por completo — do `config` (pra não ser mais
+// buscado) E do `state` (pra sumir da tela na hora, sem esperar a próxima checagem — ver
+// "`state` é a fonte de verdade da tela" no doc do projeto). Compartilhada entre o botão
+// "remover" da lista de gerenciamento em "Fontes personalizadas" (renderCustomSources) e o
+// botão "remover" da própria tabela de status em "Fontes personalizadas — avulsos
+// acompanhados" (renderCustomAvulsoStatus, desde v1.10.4) — reportado pelo Murilo: "a
+// fonte personalizada de chamados avulsos não possui botao para fazer a exclusão do
+// acompanhamento... uma vez adicionado ele fica preso lá". O botão pra isso já existia (na
+// lista de gerenciamento, dentro do bloco de config de cada fonte), mas ficava escondido
+// longe da tabela onde o Murilo estava efetivamente olhando os dados — agora também dá
+// pra remover direto de lá.
+async function removeCustomAvulso(sourceId, num) {
+  await updateCustomSource(sourceId, (s) => {
+    s.avulsos = (s.avulsos || []).filter((n) => n !== num);
+    if (s.avulsoStaleDays) delete s.avulsoStaleDays[num];
+    if (s.avulsoUrls) delete s.avulsoUrls[num];
+  });
+  await pruneCustomAvulsoFromState(sourceId, num);
+}
+
 // Lê o valor digitado no campo de dias por avulso e salva no mapa de overrides
 // correspondente — vazio ou 0 remove o override (volta a usar o padrão geral).
 function applyStaleOverride(map, num, value) {
@@ -491,12 +511,7 @@ function renderCustomSources(config) {
       source.avulsos || [],
       source.avulsoStaleDays || {},
       (num) => {
-        updateCustomSource(source.id, (s) => {
-          s.avulsos = (s.avulsos || []).filter((n) => n !== num);
-          if (s.avulsoStaleDays) delete s.avulsoStaleDays[num];
-          if (s.avulsoUrls) delete s.avulsoUrls[num];
-        });
-        pruneCustomAvulsoFromState(source.id, num);
+        removeCustomAvulso(source.id, num);
       },
       (num, value) => updateCustomSource(source.id, (s) => {
         s.avulsoStaleDays = applyStaleOverride(s.avulsoStaleDays, num, value);
@@ -554,7 +569,11 @@ function renderCustomAvulsoStatus(state, config) {
   pruneCustomBlocks('avulso', new Set(sources.map((s) => s.id)));
   sources.forEach((source) => {
     const map = (state.customAvulsos && state.customAvulsos[source.id]) || {};
-    updateCustomEntriesBlock(wrap, `${source.id}:avulso`, source.label, source, map, source.enabled === false, (source.avulsos || []).length);
+    updateCustomEntriesBlock(
+      wrap, `${source.id}:avulso`, source.label, source, map, source.enabled === false, (source.avulsos || []).length,
+      undefined,
+      (id) => removeCustomAvulso(source.id, id)
+    );
   });
 }
 
@@ -903,7 +922,7 @@ function getOrCreateCustomBlock(wrap, filterKey, label) {
 }
 
 function renderCustomEntriesRows(entry, filterKey) {
-  const { source, map, disabled, configuredCount, emptyMessage } = entry.current || {};
+  const { source, map, disabled, configuredCount, emptyMessage, onRemove } = entry.current || {};
   const target = entry.target;
   target.innerHTML = '';
   if (disabled) {
@@ -935,14 +954,37 @@ function renderCustomEntriesRows(entry, filterKey) {
   wrap.className = 'table-scroll';
   const table = document.createElement('table');
   table.className = 'ticket-table custom-entries-table';
-  const totalCols = 1 + fields.length;
+  // Coluna de "remover" só existe quando `onRemove` é passado — hoje só pela tabela de
+  // "avulsos acompanhados" (renderCustomAvulsoStatus), nunca pela de "lista automática"
+  // (renderCustomListStatus): um item ali é achado automaticamente na grade, não faz
+  // sentido "remover" um item que reaparece sozinho enquanto continuar existindo na
+  // fonte — pra tirar um chamado dali, é a própria fonte que precisa parar de listá-lo.
+  const dataCols = 1 + fields.length;
+  const totalCols = dataCols + (onRemove ? 1 : 0);
   const thead = document.createElement('thead');
-  thead.innerHTML = `<tr><th>Número</th>${fields.map((f) => `<th>${escapeHtml(f.label || f.key)}</th>`).join('')}</tr>`;
+  thead.innerHTML = `<tr><th>Número</th>${fields.map((f) => `<th>${escapeHtml(f.label || f.key)}</th>`).join('')}${onRemove ? '<th></th>' : ''}</tr>`;
   const tbody = document.createElement('tbody');
+  function buildRemoveTd(id) {
+    const td = document.createElement('td');
+    td.className = 'actions';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'row-remove-btn';
+    btn.textContent = 'remover';
+    btn.title = 'Parar de acompanhar esse avulso';
+    btn.addEventListener('click', () => onRemove(id));
+    td.appendChild(btn);
+    return td;
+  }
   entries.forEach(([id, data]) => {
     const tr = document.createElement('tr');
     if (data.error) {
-      tr.innerHTML = `<td colspan="${totalCols}" class="muted err">${escapeHtml(`${id}: ${data.error}`)}</td>`;
+      const errTd = document.createElement('td');
+      errTd.colSpan = dataCols;
+      errTd.className = 'muted err';
+      errTd.textContent = `${id}: ${data.error}`;
+      tr.appendChild(errTd);
+      if (onRemove) tr.appendChild(buildRemoveTd(id));
       tbody.appendChild(tr);
       return;
     }
@@ -968,6 +1010,7 @@ function renderCustomEntriesRows(entry, filterKey) {
       if (!value) td.className = 'muted';
       tr.appendChild(td);
     });
+    if (onRemove) tr.appendChild(buildRemoveTd(id));
     tbody.appendChild(tr);
   });
   table.appendChild(thead);
@@ -976,9 +1019,9 @@ function renderCustomEntriesRows(entry, filterKey) {
   target.appendChild(wrap);
 }
 
-function updateCustomEntriesBlock(wrap, filterKey, label, source, map, disabled, configuredCount, emptyMessage) {
+function updateCustomEntriesBlock(wrap, filterKey, label, source, map, disabled, configuredCount, emptyMessage, onRemove) {
   const entry = getOrCreateCustomBlock(wrap, filterKey, label);
-  entry.current = { source, map, disabled, configuredCount, emptyMessage };
+  entry.current = { source, map, disabled, configuredCount, emptyMessage, onRemove };
   entry.renderRows();
 }
 
