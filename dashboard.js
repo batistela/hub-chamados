@@ -767,14 +767,38 @@ function fillAvulsoStatusInto(ul, map, linkFn, disabled, configuredCount, emptyM
 // em `extraFields` (lista de `{key,label,value}`) — então cada coluna só precisa saber
 // que PAPEL ler; o rótulo do cabeçalho vem de `customSourceFieldList(source.columns)`,
 // não do `state`.
-function customFieldValue(field, data, extraByKey) {
+// `extraLookup` vem de `buildExtraLookup` — casa por `key` (o normal, desde v1.10.2)
+// com um FALLBACK por `label` só pra cobrir uma janela de transição: logo depois de
+// atualizar a extensão, o `state` ainda guardado no storage pode ter sido escrito pela
+// checagem automática ANTERIOR, rodada com o `background.js` de antes de existir o
+// `key` em `extraFields` — nesse caso `f.key` vem `undefined` em todo campo, e sem esse
+// fallback o campo ficaria em branco na tela até a PRÓXIMA checagem rodar (minutos,
+// dependendo do `intervalMinutes`) em vez de já aparecer certo com o dado que já está
+// salvo. Uma vez que uma checagem nova rodar com o código atualizado, `key` volta a
+// bater normalmente e esse fallback nem chega a ser usado.
+function customFieldValue(field, data, extraLookup) {
   switch (field.role) {
     case 'title': return data.title || '';
     case 'status': return data.status || '';
     case 'lastUpdate': return data.lastUpdate || '';
     case 'lastUpdateBy': return data.lastUpdateBy || '';
-    default: return (extraByKey[field.key] != null ? extraByKey[field.key] : '') || '';
+    default: {
+      const byKey = extraLookup.byKey[field.key];
+      if (byKey != null && byKey !== '') return byKey;
+      const byLabel = field.label ? extraLookup.byLabel[field.label] : null;
+      return byLabel != null ? byLabel : '';
+    }
   }
+}
+
+function buildExtraLookup(data) {
+  const byKey = {};
+  const byLabel = {};
+  (data.extraFields || []).forEach((f) => {
+    byKey[f.key] = f.value;
+    if (f.label) byLabel[f.label] = f.value;
+  });
+  return { byKey, byLabel };
 }
 
 // Filtros de exibição das tabelas de fontes personalizadas — mesmo espírito de
@@ -800,9 +824,8 @@ function applyCustomTableFilter(entries, filter, fields) {
   const term = (filter.search || '').trim().toLowerCase();
   if (term) {
     out = out.filter(([id, data]) => {
-      const extraByKey = {};
-      (data.extraFields || []).forEach((f) => { extraByKey[f.key] = f.value; });
-      const values = fields.map((f) => customFieldValue(f, data, extraByKey));
+      const extraLookup = buildExtraLookup(data);
+      const values = fields.map((f) => customFieldValue(f, data, extraLookup));
       const haystack = `${id} ${values.join(' ')}`.toLowerCase();
       return haystack.includes(term);
     });
@@ -937,11 +960,10 @@ function renderCustomEntriesRows(entry, filterKey) {
       numTd.appendChild(hint);
     }
     tr.appendChild(numTd);
-    const extraByKey = {};
-    (data.extraFields || []).forEach((f) => { extraByKey[f.key] = f.value; });
+    const extraLookup = buildExtraLookup(data);
     fields.forEach((field) => {
       const td = document.createElement('td');
-      const value = customFieldValue(field, data, extraByKey);
+      const value = customFieldValue(field, data, extraLookup);
       td.textContent = value || '—';
       if (!value) td.className = 'muted';
       tr.appendChild(td);

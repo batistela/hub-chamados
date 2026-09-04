@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hub de Chamados - Holambra",
-  "version": "1.10.2",
+  "version": "1.10.3",
   "description": "Monitora chamados no GLPI, Evolutize e Movidesk (e fontes personalizadas que você cadastrar) e avisa (notificação + som) quando algo mudar.",
   "permissions": ["storage", "unlimitedStorage", "alarms", "notifications", "scripting", "tabs", "offscreen", "downloads", "permissions"],
   "host_permissions": [

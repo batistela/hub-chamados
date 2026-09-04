@@ -1,5 +1,5 @@
 {
-  "version": "1.10.2",
-  "notes": "As tabelas de 'Fontes personalizadas' (avulsos e lista automática) agora mostram os campos capturados como colunas de verdade, em vez de texto corrido — e ganharam busca + 'Ocultar encerrados/fechados', igual ao GLPI e à Evolutize.",
+  "version": "1.10.3",
+  "notes": "Correção: colunas de 'informação' nas tabelas de fontes personalizadas (ex: 'Solicitante', 'Título') podiam aparecer vazias logo depois de atualizar a extensão, se o Hub ainda não tivesse rodado uma checagem nova. Agora a tabela também reconhece o dado salvo pela checagem anterior enquanto a próxima não roda.",
   "url": "https://github.com/batistela/hub-chamados"
 }
