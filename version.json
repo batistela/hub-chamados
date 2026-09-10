@@ -1,5 +1,5 @@
 {
-  "version": "1.10.4",
-  "notes": "A tabela de 'Fontes personalizadas — avulsos acompanhados' ganhou um botão 'remover' por linha, direto na própria tabela — antes o único jeito de parar de acompanhar um avulso de fonte personalizada era abrir o bloco de configuração da fonte, mais abaixo na página.",
+  "version": "1.10.5",
+  "notes": "Chamado que some da lista (GLPI, Evolutize, Movidesk ou fonte personalizada em modo lista) só é considerado 'provavelmente encerrado' depois de 2 checagens seguidas sem ele aparecer, não mais na primeira — evita marcar como encerrado um chamado que só sumiu por causa de uma leitura incompleta da página (paginação, carregamento parcial, etc).",
   "url": "https://github.com/batistela/hub-chamados"
 }

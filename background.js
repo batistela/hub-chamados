@@ -707,7 +707,18 @@ function lastUpdateSuffix(data) {
   return ` (última tramitação segundo a fonte: ${data.lastUpdate}${who})`;
 }
 
-function diffListSource(sourceLabel, prevMap, nextList, opts = {}) {
+// Quantas checagens SEGUIDAS um chamado precisa ficar fora da lista antes do Hub declarar
+// "sumiu (provavelmente encerrado)" — ver comentário completo logo abaixo, na parte que
+// decide isso pra cada `id` de prevMap que não apareceu na leitura atual.
+const SUMIU_GRACE_CHECKS = 1;
+
+// Exportadas (só isso, nada mais no arquivo) unicamente pra permitir um teste automatizado
+// direto contra o código de verdade (`/tmp/test_diff_grace_period.mjs`) — sem isso, testar
+// essa lógica exigiria ou duplicar o código no teste (testando uma cópia, não o real) ou
+// simular toda a superfície de `chrome.*` que o resto do arquivo usa só pra poder importar
+// uma função que nem depende disso. Não muda nada em como o service worker usa essas
+// funções internamente (continuam chamadas do mesmo jeito, dentro deste mesmo arquivo).
+export function diffListSource(sourceLabel, prevMap, nextList, opts = {}) {
   const events = [];
   const rawNextMap = toMap(nextList);
   const nextMap = {};
@@ -746,15 +757,38 @@ function diffListSource(sourceLabel, prevMap, nextList, opts = {}) {
     }
     nextMap[id] = next;
   }
+  // Chamado que estava na leitura anterior e não apareceu nessa — pode ter sido encerrado
+  // de verdade (o caso normal), mas também pode ser uma leitura incompleta que NÃO chegou
+  // a lançar `pageError` (ver checkGLPIList/checkEvolutizeList/checkMovidesk/
+  // checkCustomList): grade paginada que só devolveu a 1ª página, virtualização que não
+  // terminou de rolar antes da extração, um filtro que mudou sozinho no site do
+  // fornecedor. Murilo (10/09/2026): "pode ser pq ele tenha sido encerrado mesmo e pode
+  // ser que ele tenha sumido pq houve falha ao acessar a lista de chamados." Em vez de
+  // declarar "sumiu (provavelmente encerrado)" já na primeira checagem em que o chamado
+  // não aparece, o Hub espera SUMIU_GRACE_CHECKS checagens seguidas sem ele aparecer antes
+  // de considerar isso confirmado — uma leitura ruim pontual se autocorrige sozinha assim
+  // que uma checagem seguinte voltar a encontrar o chamado normalmente (o contador é
+  // zerado sem gerar evento nenhum, ver o `if (!prev)`/bloco de cima — a entrada nova
+  // substitui a anterior por completo, sem herdar `__missCount`). Custo consciente: um
+  // chamado encerrado de verdade demora SUMIU_GRACE_CHECKS checagens a mais pra disparar o
+  // aviso, em troca de não fechar chamados abertos por engano numa leitura parcial.
   for (const id of Object.keys(prevMap)) {
     if (!rawNextMap[id]) {
-      events.push({ source: sourceLabel, id, title: prevMap[id].title, url: prevMap[id].url || null, change: 'sumiu', detail: `Não aparece mais na lista (provavelmente foi encerrado/concluído)${lastUpdateSuffix(prevMap[id])}` });
+      const prevEntry = prevMap[id];
+      const missCount = (prevEntry.__missCount || 0) + 1;
+      if (missCount <= SUMIU_GRACE_CHECKS) {
+        // Ainda dentro da carência: mantém o chamado como estava (mesmos dados, sem
+        // gerar evento), só guardando quantas vezes seguidas ele já ficou de fora.
+        nextMap[id] = { ...prevEntry, __missCount: missCount };
+        continue;
+      }
+      events.push({ source: sourceLabel, id, title: prevEntry.title, url: prevEntry.url || null, change: 'sumiu', detail: `Não aparece mais na lista há ${missCount} checagens seguidas (provavelmente foi encerrado/concluído)${lastUpdateSuffix(prevEntry)}` });
     }
   }
   return { nextMap, events };
 }
 
-function diffAvulsoSource(sourceLabel, prevMap, nextMap) {
+export function diffAvulsoSource(sourceLabel, prevMap, nextMap) {
   const events = [];
   const resultMap = {};
   for (const id of Object.keys(nextMap)) {
